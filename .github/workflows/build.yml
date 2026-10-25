@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      UPLOAD_KEY: ${{ secrets.UPLOAD_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -21,7 +23,7 @@ jobs:
 
       - uses: android-actions/setup-android@v3
         with:
-          packages: "platforms;android-34 build-tools;34.0.0"
+          packages: "platforms;android-34 platforms;android-35 build-tools;34.0.0 build-tools;35.0.0"
 
       - uses: gradle/actions/setup-gradle@v3
         with:
@@ -37,17 +39,36 @@ jobs:
           cp pos/build/outputs/apk/debug/pos-debug.apk out/d1-pos.apk
           ls -la out
 
+      # Google Play (prueba interna): bundle .aab firmado con la upload key. Secreto UPLOAD_KEY = "password:base64(release.jks)".
+      - name: Upload key
+        if: env.UPLOAD_KEY != ''
+        run: |
+          echo "${UPLOAD_KEY#*:}" | base64 -d > wallet/release.jks
+          echo "KEYSTORE_PASSWORD=${UPLOAD_KEY%%:*}" >> "$GITHUB_ENV"
+      - name: Build signed bundle + release APK (wallet)
+        if: env.UPLOAD_KEY != ''
+        run: |
+          gradle --no-daemon :wallet:bundleRelease :wallet:assembleRelease
+          cp wallet/build/outputs/bundle/release/wallet-release.aab out/d1-wallet.aab
+          cp wallet/build/outputs/apk/release/wallet-release.apk out/d1-wallet-release.apk
+          rm -f wallet/release.jks
+          ls -la out
+
       - uses: actions/upload-artifact@v4
         with:
           name: apks
-          path: out/*.apk
+          path: |
+            out/*.apk
+            out/*.aab
 
       - name: Publish "latest" release with the APKs
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: D1 NFC demo — latest build
-          body: "APKs de la última compilación: d1-wallet.apk (teléfono = tarjeta, HCE) y d1-pos.apk (lector/POS)."
-          files: out/*.apk
+          body: "Última compilación: d1-wallet.apk (motor NFC, debug), d1-wallet.aab + d1-wallet-release.apk (firmados, para Google Play) y d1-pos.apk (lector/POS)."
+          files: |
+            out/*.apk
+            out/*.aab
           prerelease: false
           make_latest: true

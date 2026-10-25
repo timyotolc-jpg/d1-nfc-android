@@ -5,17 +5,33 @@ plugins {
 
 android {
     namespace = "io.argenticpay.d1wallet"
-    compileSdk = 34
+    compileSdk = 35   // Google Play exige target 35 para apps nuevas (prueba interna incluida)
 
     defaultConfig {
         applicationId = "io.argenticpay.d1wallet"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 2
-        versionName = "2.0"
+        targetSdk = 35
+        versionCode = 3
+        versionName = "2.1"
+    }
+    // Firma de release: el workflow deja la upload key en wallet/release.jks (secreto UPLOAD_KEY = "password:base64(jks)")
+    val ksFile = file("release.jks")
+    val ksPass = System.getenv("KEYSTORE_PASSWORD") ?: ""
+    signingConfigs {
+        create("release") {
+            if (ksFile.exists() && ksPass.isNotEmpty()) {
+                storeFile = ksFile
+                storePassword = ksPass
+                keyAlias = "d1wallet"
+                keyPassword = ksPass
+            }
+        }
     }
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            if (ksFile.exists() && ksPass.isNotEmpty()) signingConfig = signingConfigs.getByName("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
