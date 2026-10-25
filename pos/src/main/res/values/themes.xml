@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.D1Pos" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">#0F1115</item>
+        <item name="android:statusBarColor">#0F1115</item>
+        <item name="android:navigationBarColor">#0F1115</item>
+        <item name="colorPrimary">#0EA5E9</item>
+        <item name="colorPrimaryVariant">#0369A1</item>
+        <item name="colorSecondary">#16A34A</item>
+        <item name="android:textColor">#F3F4F6</item>
+    </style>
+</resources>

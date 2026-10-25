@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="#0F1115"
+    android:padding="14dp">
+
+    <!-- barra superior: comercio + config -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+        <Spinner
+            android:id="@+id/merchant"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:backgroundTint="#9aa3d8" />
+        <TextView
+            android:id="@+id/terminal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="POS-0412"
+            android:textColor="#8892b0"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:paddingHorizontal="8dp" />
+        <Button
+            android:id="@+id/btnConfig"
+            style="?attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⚙"
+            android:textSize="20sp"
+            android:textColor="#9aa3d8" />
+    </LinearLayout>
+
+    <!-- pantalla del POS -->
+    <LinearLayout
+        android:id="@+id/screen"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical"
+        android:background="#F7F8FB"
+        android:padding="16dp"
+        android:gravity="center_horizontal">
+
+        <TextView
+            android:id="@+id/merchantName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="SantoShops"
+            android:textColor="#FFFFFF"
+            android:background="#0f6b3c"
+            android:padding="10dp"
+            android:textStyle="bold"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:text="IMPORTE"
+            android:textColor="#6d6d72"
+            android:letterSpacing="0.12"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/amount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="$0"
+            android:textColor="#111111"
+            android:fontFamily="monospace"
+            android:textSize="40sp"
+            android:textStyle="bold" />
+
+        <!-- zona de estado (ícono + mensaje) -->
+        <LinearLayout
+            android:id="@+id/statusBox"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+            <TextView
+                android:id="@+id/bigIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="))))"
+                android:textColor="#0ea5e9"
+                android:textSize="48sp"
+                android:visibility="gone" />
+            <TextView
+                android:id="@+id/status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text=""
+                android:textColor="#111111"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+            <TextView
+                android:id="@+id/detail"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:gravity="center"
+                android:text=""
+                android:textColor="#6d6d72"
+                android:textSize="13sp" />
+            <TextView
+                android:id="@+id/apdu"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:fontFamily="monospace"
+                android:textColor="#0369a1"
+                android:background="#e0f2fe"
+                android:padding="6dp"
+                android:textSize="10sp"
+                android:maxLines="6"
+                android:text="" />
+        </LinearLayout>
+
+        <!-- teclado -->
+        <GridLayout
+            android:id="@+id/keys"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:columnCount="3"
+            android:rowCount="4" />
+
+        <Button
+            android:id="@+id/btnMain"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="#16a34a"
+            android:text="COBRAR"
+            android:textColor="#FFFFFF"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/foot"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:layout_marginTop="8dp"
+        android:fontFamily="monospace"
+        android:textColor="#5c668f"
+        android:textSize="11sp"
+        android:text="D1 POS · NFC listo" />
+</LinearLayout>
