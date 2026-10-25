@@ -49,4 +49,5 @@ jobs:
           name: D1 NFC demo — latest build
           body: "APKs de la última compilación: d1-wallet.apk (teléfono = tarjeta, HCE) y d1-pos.apk (lector/POS)."
           files: out/*.apk
-          prerelease: true
+          prerelease: false
+          make_latest: true
