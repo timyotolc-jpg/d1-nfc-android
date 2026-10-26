@@ -24,7 +24,10 @@ class AuthActivity : AppCompatActivity() {
         val amount = intent?.getStringExtra("amount") ?: ""
         val allowed = BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
         if (BiometricManager.from(this).canAuthenticate(allowed) != BiometricManager.BIOMETRIC_SUCCESS) {
-            Relay.wallet(JSONObject().put("type", "auth").put("ok", false).put("error", "no biometrics/keyguard"))
+            // sin huella ni bloqueo (teléfono de demo): la credencial se da por válida y el 2.º toque paga
+            store.setPreauth(60)
+            Relay.wallet(JSONObject().put("type", "auth").put("ok", true).put("skipped", true).put("preauth", true).put("until", store.preauthUntil).put("state", store.stateJson(this)))
+            Relay.wallet(JSONObject().put("type", "ready").put("until", store.preauthUntil))
             finish(); return
         }
         val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {

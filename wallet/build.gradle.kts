@@ -11,8 +11,8 @@ android {
         applicationId = "io.argenticpay.d1wallet"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "2.1"
+        versionCode = 4
+        versionName = "2.2"
     }
     // Firma de release: el workflow deja la upload key en wallet/release.jks (secreto UPLOAD_KEY = "password:base64(jks)")
     val ksFile = file("release.jks")

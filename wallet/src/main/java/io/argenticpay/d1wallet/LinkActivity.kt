@@ -52,10 +52,11 @@ class LinkActivity : AppCompatActivity() {
         val title = u.getQueryParameter("title")?.takeIf { it.isNotBlank() } ?: "Confirmá con tu huella o cara"
         when (action) {
             "setup", "state", "nfc" -> { emitState(); askNotifications { done() } }
-            "provision" -> gate(wantAuth, title) { provision(u) }
+            "provision" -> { pendingAction = "provision"; gate(wantAuth, title) { provision(u) } }
             "replenish" -> replenish()
-            "delete", "deleteToken" -> gate(wantAuth, title) { deleteToken() }
+            "delete", "deleteToken" -> { pendingAction = "delete"; gate(wantAuth, title) { deleteToken() } }
             "preauth" -> {
+                pendingAction = "preauth"
                 val secs = u.getQueryParameter("seconds")?.toIntOrNull()?.takeIf { it > 0 } ?: 60
                 biometric(title) {
                     store.setPreauth(secs)
@@ -82,6 +83,16 @@ class LinkActivity : AppCompatActivity() {
         overridePendingTransition(0, 0)
     }
 
+    private var pendingAction = ""
+    private fun failPending(err: String) {
+        when (pendingAction) {
+            "provision" -> wallet(JSONObject().put("type", "provision").put("ok", false).put("error", err))
+            "delete" -> wallet(JSONObject().put("type", "deleted").put("ok", false).put("error", err))
+            "preauth" -> wallet(JSONObject().put("type", "ready").put("ok", false).put("error", err))
+            else -> {}
+        }
+    }
+
     private fun gate(wantAuth: Boolean, title: String, block: () -> Unit) {
         if (!wantAuth) { block(); return }
         biometric(title) {
@@ -90,18 +101,20 @@ class LinkActivity : AppCompatActivity() {
         }
     }
 
+    /** Si el equipo no tiene huella/cara ni bloqueo de pantalla (teléfono de demo), se omite la verificación y sigue. */
     private fun biometric(title: String, onOk: () -> Unit) {
         val bm = BiometricManager.from(this)
         val allowed = BiometricManager.Authenticators.BIOMETRIC_WEAK or BiometricManager.Authenticators.DEVICE_CREDENTIAL
         if (bm.canAuthenticate(allowed) != BiometricManager.BIOMETRIC_SUCCESS) {
-            Toast.makeText(this, "Configurá huella/cara o bloqueo de pantalla", Toast.LENGTH_LONG).show()
-            wallet(JSONObject().put("type", "auth").put("ok", false).put("error", "no biometrics/keyguard"))
-            done(); return
+            Toast.makeText(this, "Sin huella ni bloqueo de pantalla: se omite la verificación (demo)", Toast.LENGTH_LONG).show()
+            wallet(JSONObject().put("type", "auth").put("ok", true).put("skipped", true).put("error", "no biometrics/keyguard"))
+            onOk(); return
         }
         val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
             override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) { onOk() }
             override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                 wallet(JSONObject().put("type", "auth").put("ok", false).put("error", errString.toString()))
+                failPending(errString.toString())
                 done()
             }
         })
