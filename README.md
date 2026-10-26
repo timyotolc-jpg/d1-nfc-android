@@ -73,6 +73,22 @@ Todos los intents llevan `api`, `session` y `tap`; la actividad es transparente,
 
 Eventos espontáneos del HCE (mismos nombres que antes, ahora por la sesión): `transactionStarted`, `apdu {msg, apdu}`, `authRequired {amount, currency}`, `transactionCompleted {amount, currency, atc, arqc, luksLeft, last4, scheme}`, `noCard`, `noKeys`, `replenished`, `replenishFailed`, `deactivated`; además un evento `tap` (type propio) que el POS de pantalla del proyector espeja.
 
+## 4a. «Tap simple» (v2.3) — sin app ni Bluetooth en el teléfono: el POS cobra al ver el teléfono
+
+Es el camino recomendado para la demo. El teléfono no necesita nada instalado: el demo web digitaliza la tarjeta como **cloud token**
+en la Lambda, atado al código de **sesión Live** (Demo ⚙ → «Sesión Live (código)», o la fila «Sesión NNNN · misma en la Q2s» en la
+pantalla de Pago sin contacto). La Q2s, con ese mismo código en ⚙ y el switch **«Tap simple»** (viene encendido), hace:
+
+1. **COBRAR** → publica `sale` en la sesión → el teléfono muestra el importe y «acercá el teléfono al POS».
+2. Entra **cualquier** teléfono al campo NFC (Android con Google/Samsung Wallet o el motor D1 responde al lector; un iPhone no) →
+   `POST /nfc/authorize {session, tapOnly:true, amount, currency, un, merchant}` → la Lambda toma el último token de la sesión,
+   genera ella el criptograma con una LUK (cloud cryptogram) y aprueba → APROBADO + ticket «VENTA · TAP SIMPLE».
+3. El teléfono, que escucha la sesión, pasa a «Listo» + push «Compra aprobada».
+
+Alternativa al campo NFC: un sticker NFC en la Q2s que el teléfono lee con Web NFC (fila «Sticker NFC en el POS») → publica `tapweb`
+en la sesión; el POS, que sondea la sesión mientras espera, lo toma como toque. Sin sesión en la Q2s el tap simple no puede cobrar y
+lo dice en pantalla. Con el switch apagado vuelve el EMV real (motor D1 / HCE, sección 4).
+
 ## 4b. SDK2 — tap por Bluetooth LE (sin app en el teléfono)
 
 El POS anuncia el servicio GATT `a1d1b1e0-0001-4d31-b1e0-d1b1e0000001` con tres características:

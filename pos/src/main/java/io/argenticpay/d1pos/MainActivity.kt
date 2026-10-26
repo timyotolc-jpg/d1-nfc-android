@@ -84,6 +84,11 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private val currency get() = prefs.getString("currency", "USD") ?: "USD"
     private val printerMac get() = prefs.getString("printer", "") ?: ""
     private val terminalId get() = prefs.getString("terminal", "POS-0412") ?: "POS-0412"
+    /** v2.3 «tap simple»: cualquier teléfono en el campo NFC (o el sticker leído por el teléfono) cobra el token de la sesión Live;
+     *  no hace falta app ni EMV en el teléfono. Apagado = EMV real (motor D1 / HCE). */
+    private val tapSimple get() = prefs.getBoolean("tapSimple", true)
+    private var pollJob: kotlinx.coroutines.Job? = null
+    private var pollSince = 0L
     private val dec get() = if (currency in setOf("CLP", "ARS", "PYG", "COP", "UYU")) 0 else 2
     private val merchant get() = merchants[merchantSp.selectedItemPosition.coerceIn(0, merchants.size - 1)]
 
@@ -235,6 +240,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         enableReader()
         live("sale", JSONObject().put("cents", cents).put("currency", currency).put("merchant", merchant.key).put("mcc", merchant.mcc).put("terminal", terminalId))
         if (blePhone.isNotEmpty()) sendSale()
+        startPoll()
         lifecycleScope.launch {
             val r = runCatching { backend.ping() }
             if (r.isFailure && (st == St.WAITING || st == St.READING)) {
@@ -244,9 +250,73 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
-    private fun cancelSale() { disableReader(); st = St.AMOUNT; render(); live("reset", JSONObject()); ble?.send("reset", JSONObject()) }
+    private fun cancelSale() { stopPoll(); disableReader(); st = St.AMOUNT; render(); live("reset", JSONObject()); ble?.send("reset", JSONObject()) }
 
-    private fun newSale() { st = St.AMOUNT; cents = 0; apdu.text = ""; render(); live("reset", JSONObject()); ble?.send("reset", JSONObject()) }
+    private fun newSale() { stopPoll(); st = St.AMOUNT; cents = 0; apdu.text = ""; render(); live("reset", JSONObject()); ble?.send("reset", JSONObject()) }
+
+    // ---------- tap simple (v2.3) ----------
+    /** Mientras la venta espera, mira la sesión Live: «tapweb» = el teléfono leyó el sticker NFC del POS (Web NFC o link de iPhone). */
+    private fun startPoll() {
+        stopPoll()
+        if (!tapSimple || session.isEmpty()) return
+        pollJob = lifecycleScope.launch {
+            val first = runCatching { backend.get("/nfc/events?session=$session&since=0") }.getOrNull()
+            pollSince = first?.optLong("last", 0L) ?: 0L
+            while (st == St.WAITING) {
+                kotlinx.coroutines.delay(1000)
+                if (st != St.WAITING) break
+                val r = runCatching { backend.get("/nfc/events?session=$session&since=$pollSince") }.getOrNull() ?: continue
+                pollSince = r.optLong("last", pollSince)
+                val evs = r.optJSONArray("events") ?: continue
+                for (i in 0 until evs.length()) {
+                    val ev = evs.getJSONObject(i)
+                    if (ev.optString("type") == "tapweb" && st == St.WAITING) {
+                        val d = ev.optJSONObject("data") ?: JSONObject()
+                        val tag = d.optString("tag", "")
+                        authorizeSimple(if (tag.isNotEmpty()) "sticker NFC $tag" else "link NFC (teléfono)", tag)
+                        return@launch
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stopPoll() { pollJob?.cancel(); pollJob = null }
+
+    /** El POS vio un teléfono (o el teléfono vio el sticker): el backend cobra el token de la sesión y genera el criptograma él. */
+    private fun authorizeSimple(prox: String, tag: String) {
+        if (st != St.WAITING) return
+        stopPoll(); disableReader()
+        lastProximity = prox
+        setStatus(St.AUTH, "Autorizando…", "Tap simple · token de la sesión $session · $prox")
+        live("reading", JSONObject().put("via", "tap-simple").put("prox", prox))
+        lifecycleScope.launch {
+            val body = JSONObject().put("session", session).put("tapOnly", true).put("amount", cents).put("currency", currency).put("un", saleUn)
+                .put("merchant", merchant.name).put("mcc", merchant.mcc).put("terminal", terminalId).put("tag", tag)
+            val res = runCatching { backend.post("/nfc/authorize", body) }.getOrElse { JSONObject().put("approved", false).put("de39", "96").put("reason", "sin conexión: " + it.message) }
+            val r = EmvReader.Result(
+                kind = EmvReader.Kind.DATA,
+                aid = if (res.optString("scheme") == "VISA") "A0000000031010" else "A0000000041010",
+                dpan = "000000000000" + res.optString("tokenLast4", "0000"),
+                arqc = res.optString("cryptogram", ""),
+                atc = res.optInt("atc", 0),
+                un = saleUn,
+                log = listOf("TAP SIMPLE · $prox", "backend → cloud cryptogram " + res.optString("cryptogram", "").take(16) + " · ATC " + res.optInt("atc", 0)),
+            )
+            apdu.text = r.log.joinToString("\n")
+            if (res.optBoolean("approved")) {
+                val auth = res.optString("authCode", "------")
+                ticketNo += 1; prefs.edit().putInt("ticket", ticketNo).apply()
+                lastReceipt = receipt(r, res, auth, viaBle = false, simple = true)
+                setStatus(St.APPROVED, "APROBADO", "Aut. $auth · " + schemeName(r.aid) + " •••• " + r.dpan.takeLast(4) + " · ticket ${"%06d".format(ticketNo)}")
+                vibrate(150)
+                if (printerMac.isNotEmpty()) printReceipt(lastReceipt)
+            } else {
+                setStatus(St.DECLINED, "RECHAZADA", res.optString("de39", "05") + " · " + res.optString("reason", "declinada"))
+                vibrate(300)
+            }
+        }
+    }
 
     private fun enableReader() {
         val a = nfc ?: return
@@ -270,6 +340,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             runOnUiThread { setStatus(St.READING, "Teléfono detectado", "Bluetooth · esperando criptograma de " + blePhone); vibrate(40) }
             live("reading", JSONObject().put("via", "ble"))
             ble?.send("tap", JSONObject().put("un", saleUn).put("amount", cents).put("currency", currency))
+            return
+        }
+        if (tapSimple && st == St.WAITING) {
+            // v2.3 tap simple: con que un teléfono entre al campo alcanza; el backend cobra el token de la sesión
+            if (session.isEmpty()) { runOnUiThread { setStatus(St.WAITING, "Falta la sesión Live", "Tap simple: poné en ⚙ el código de 4 dígitos de Demo ⚙ «Sesión Live»") ; vibrate(80) }; return }
+            runOnUiThread { vibrate(40); authorizeSimple("campo NFC del POS", "") }
             return
         }
         runOnUiThread { st = St.READING; render(); vibrate(40) }
@@ -312,7 +388,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private fun schemeName(aid: String) = if (aid.startsWith("A0000000031010") || aid.startsWith("A0000000032010")) "Visa" else "Mastercard"
 
-    private fun receipt(r: EmvReader.Result, res: JSONObject, auth: String, viaBle: Boolean = false): List<String> {
+    private fun receipt(r: EmvReader.Result, res: JSONObject, auth: String, viaBle: Boolean = false, simple: Boolean = false): List<String> {
         val m = merchant
         val now = Date()
         return listOf(
@@ -322,10 +398,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             "=Ticket ${"%06d".format(ticketNo)}",
             "-",
             SimpleDateFormat("dd/MM/yyyy", Locale.US).format(now) + "              " + SimpleDateFormat("HH:mm", Locale.US).format(now),
-            if (viaBle) "!VENTA · TAP BLUETOOTH" else "!VENTA · CONTACTLESS",
+            if (simple) "!VENTA · TAP SIMPLE" else if (viaBle) "!VENTA · TAP BLUETOOTH" else "!VENTA · CONTACTLESS",
             schemeName(r.aid) + " •••• " + r.dpan.takeLast(4) + "        Token",
-            if (viaBle) "D1 Wallet SDK2 · BLE         Telefono" else "D1 NFC Wallet · HCE          Telefono",
-            if (viaBle) "=Proximidad: $lastProximity" else "=Lectura: campo NFC",
+            if (simple) "D1 cloud token · sesion $session   Telefono" else if (viaBle) "D1 Wallet SDK2 · BLE         Telefono" else "D1 NFC Wallet · HCE          Telefono",
+            if (viaBle || simple) "=Proximidad: $lastProximity" else "=Lectura: campo NFC",
             "AID " + r.aid,
             "ATC " + "%04d".format(r.atc) + "   ARQC " + r.arqc.take(8) + "…",
             "CDCVM ✓ biometria        Sin firma",
@@ -376,7 +452,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             bleStatus.isNotEmpty() -> bleStatus
             else -> "BLE –"
         }
-        foot.text = (if (session.isNotEmpty()) "Live · sesión $session · " else "") + (if (printerMac.isNotEmpty()) "impresora BT ✓" else "sin impresora") + " · " + currency + " · " + bleTxt
+        foot.text = (if (session.isNotEmpty()) "Live · sesión $session · " else "") + (if (tapSimple) "tap simple · " else "EMV · ") + (if (printerMac.isNotEmpty()) "impresora BT ✓" else "sin impresora") + " · " + currency + " · " + bleTxt
     }
 
     private fun live(type: String, data: JSONObject) {
@@ -400,14 +476,16 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val names = listOf("Sin impresora") + printers.map { (it.name ?: "?") + " · " + it.address }
         val spPr = Spinner(this).apply { adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, names); setSelection((printers.indexOfFirst { it.address == printerMac } + 1).coerceAtLeast(0)) }
         val lbl = { t: String -> TextView(this).apply { text = t; setTextColor(Color.GRAY); textSize = 12f; setPadding(0, pad / 2, 0, 0) } }
-        box.addView(eApi); box.addView(eSes); box.addView(eTerm); box.addView(lbl("Moneda")); box.addView(spCur); box.addView(lbl("Impresora Bluetooth (emparejada)")); box.addView(spPr)
+        val swSimple = android.widget.Switch(this).apply { text = "Tap simple (sin app en el teléfono): cualquier teléfono en el campo NFC cobra el token de la sesión Live"; isChecked = tapSimple; textSize = 13f; setPadding(0, pad / 2, 0, 0) }
+        box.addView(eApi); box.addView(eSes); box.addView(eTerm); box.addView(swSimple); box.addView(lbl("Moneda")); box.addView(spCur); box.addView(lbl("Impresora Bluetooth (emparejada)")); box.addView(spPr)
         box.addView(lbl("Tap Bluetooth (SDK2): " + when { ble == null -> if (bleStatus.isNotEmpty()) bleStatus else "sin permisos / no soportado"; blePhone.isNotEmpty() -> "teléfono conectado · $blePhone"; ble?.advertising == true -> "anunciando, esperando teléfono"; else -> bleStatus }))
         val btnTest = Button(this).apply { text = "Imprimir ticket de prueba"; gravity = Gravity.CENTER }
         box.addView(btnTest)
         val dlg = AlertDialog.Builder(this).setTitle("D1 POS · configuración").setView(box)
             .setPositiveButton("Guardar") { _, _ ->
                 prefs.edit().putString("api", eApi.text.toString().trim()).putString("session", eSes.text.toString().trim()).putString("terminal", eTerm.text.toString().trim())
-                    .putString("currency", curList[spCur.selectedItemPosition]).putString("printer", if (spPr.selectedItemPosition == 0) "" else printers[spPr.selectedItemPosition - 1].address).apply()
+                    .putString("currency", curList[spCur.selectedItemPosition]).putString("printer", if (spPr.selectedItemPosition == 0) "" else printers[spPr.selectedItemPosition - 1].address)
+                    .putBoolean("tapSimple", swSimple.isChecked).apply()
                 findViewById<TextView>(R.id.terminal).text = terminalId
                 render()
             }.setNegativeButton("Cerrar", null).create()

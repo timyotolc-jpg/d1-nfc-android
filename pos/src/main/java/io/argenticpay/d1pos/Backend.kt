@@ -19,6 +19,17 @@ class Backend(private val base: () -> String) {
         j
     }
 
+    suspend fun get(path: String): JSONObject = withContext(Dispatchers.IO) {
+        val c = URL(base().trimEnd('/') + path).openConnection() as HttpURLConnection
+        c.requestMethod = "GET"; c.connectTimeout = 6000; c.readTimeout = 8000
+        c.setRequestProperty("Accept", "application/json")
+        val code = c.responseCode
+        val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.readText() ?: "{}"
+        val j = runCatching { JSONObject(text) }.getOrElse { JSONObject().put("error", text) }
+        j.put("httpStatus", code)
+        j
+    }
+
     /** GET liviano para saber si el backend responde (cualquier código HTTP cuenta como "hay conexión"). */
     suspend fun ping(): Int = withContext(Dispatchers.IO) {
         val c = URL(base().trimEnd('/') + "/nfc/events?session=0&since=0").openConnection() as HttpURLConnection
