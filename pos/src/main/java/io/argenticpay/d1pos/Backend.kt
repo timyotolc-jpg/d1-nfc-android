@@ -18,4 +18,13 @@ class Backend(private val base: () -> String) {
         j.put("httpStatus", code)
         j
     }
+
+    /** GET liviano para saber si el backend responde (cualquier código HTTP cuenta como "hay conexión"). */
+    suspend fun ping(): Int = withContext(Dispatchers.IO) {
+        val c = URL(base().trimEnd('/') + "/nfc/events?session=0&since=0").openConnection() as HttpURLConnection
+        c.requestMethod = "GET"; c.connectTimeout = 5000; c.readTimeout = 6000
+        val code = c.responseCode
+        c.disconnect()
+        code
+    }
 }

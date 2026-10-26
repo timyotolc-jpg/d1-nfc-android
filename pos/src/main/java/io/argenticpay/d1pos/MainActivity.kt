@@ -11,6 +11,7 @@ import android.nfc.Tag
 import android.nfc.tech.IsoDep
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
@@ -71,6 +72,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private var ble: BleTap? = null
     private var blePhone = ""
     private var saleUn = ""
+    private var lastProximity = ""   // SDK2: cómo se probó la cercanía del teléfono (campo NFC del POS / sticker NFC / ninguna)
     private var st = St.AMOUNT
     private var cents = 0L
     private var ticketNo = 317
@@ -164,6 +166,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private fun authorizeBle(cmd: JSONObject) {
         if (st != St.WAITING && st != St.READING) return
         disableReader()
+        val tagUid = cmd.optString("tag", "")
+        lastProximity = if (tagUid.isNotEmpty()) "sticker NFC " + tagUid.take(23) else if (st == St.READING) "campo NFC del POS" else "sin toque (confirmación remota)"
         val r = EmvReader.Result(
             kind = EmvReader.Kind.DATA,
             aid = cmd.optString("aid", "A0000000041010"),
@@ -171,7 +175,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             arqc = cmd.optString("arqc"),
             atc = cmd.optInt("atc"),
             un = cmd.optString("un", saleUn),
-            log = listOf("BLE ← crypto " + cmd.optString("arqc").take(16) + " · ATC " + cmd.optInt("atc")),
+            log = listOf("BLE ← crypto " + cmd.optString("arqc").take(16) + " · ATC " + cmd.optInt("atc"), "proximidad: $lastProximity"),
         )
         apdu.text = r.log.joinToString("\n")
         live("reading", JSONObject().put("via", "ble"))
@@ -231,6 +235,13 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         enableReader()
         live("sale", JSONObject().put("cents", cents).put("currency", currency).put("merchant", merchant.key).put("mcc", merchant.mcc).put("terminal", terminalId))
         if (blePhone.isNotEmpty()) sendSale()
+        lifecycleScope.launch {
+            val r = runCatching { backend.ping() }
+            if (r.isFailure && (st == St.WAITING || st == St.READING)) {
+                detail.text = "⚠ Sin conexión con el backend (" + (r.exceptionOrNull()?.message ?: "error").take(50) + ") · revisá Wi-Fi/datos y la URL en ⚙"
+                vibrate(200)
+            }
+        }
     }
 
     private fun cancelSale() { disableReader(); st = St.AMOUNT; render(); live("reset", JSONObject()); ble?.send("reset", JSONObject()) }
@@ -251,6 +262,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     /** Callback de NfcAdapter.ReaderCallback: llegó un tag al campo. */
     override fun onTagDiscovered(tag: Tag) {
         if (st != St.WAITING && st != St.SEE_PHONE) return
+        // v2.2: solo cuentan tarjetas/teléfonos ISO-DEP. Un sticker NFC (NTAG) pegado en el POS para la proximidad del SDK2
+        // queda siempre dentro del campo y no debe disparar nada acá.
+        val iso = IsoDep.get(tag) ?: run { Log.d("D1POS", "tag no ISO-DEP ignorado: " + tag.techList.joinToString()); return }
         if (blePhone.isNotEmpty() && st == St.WAITING) {
             // SDK2: el teléfono conectado por BLE tocó el lector → le pedimos el criptograma por Bluetooth
             runOnUiThread { setStatus(St.READING, "Teléfono detectado", "Bluetooth · esperando criptograma de " + blePhone); vibrate(40) }
@@ -258,7 +272,6 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             ble?.send("tap", JSONObject().put("un", saleUn).put("amount", cents).put("currency", currency))
             return
         }
-        val iso = IsoDep.get(tag) ?: run { runOnUiThread { setStatus(St.NO_CARD, "No es una tarjeta EMV", "ISO-DEP no disponible") }; return }
         runOnUiThread { st = St.READING; render(); vibrate(40) }
         live("reading", JSONObject())
         lifecycleScope.launch {
@@ -312,6 +325,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             if (viaBle) "!VENTA · TAP BLUETOOTH" else "!VENTA · CONTACTLESS",
             schemeName(r.aid) + " •••• " + r.dpan.takeLast(4) + "        Token",
             if (viaBle) "D1 Wallet SDK2 · BLE         Telefono" else "D1 NFC Wallet · HCE          Telefono",
+            if (viaBle) "=Proximidad: $lastProximity" else "=Lectura: campo NFC",
             "AID " + r.aid,
             "ATC " + "%04d".format(r.atc) + "   ARQC " + r.arqc.take(8) + "…",
             "CDCVM ✓ biometria        Sin firma",

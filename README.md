@@ -85,7 +85,20 @@ El POS anuncia el servicio GATT `a1d1b1e0-0001-4d31-b1e0-d1b1e0000001` con tres 
 
 La notificación es corta y el teléfono lee `data` después: así no importa el MTU. Las escrituras largas llegan como *prepared writes* y el servidor las junta. Requiere que el equipo pueda anunciar (`BluetoothAdapter.bluetoothLeAdvertiser != null`): la mayoría de los Android lo soporta; si no, el POS lo dice en ⚙ y hay que usar otro Android como lector.
 
-Secuencia: **COBRAR** → `sale` por BLE (+ NFC activo) → si el teléfono entra al campo NFC, `tap` por BLE; si no, el usuario confirma con la huella en la hoja de pago → el web calcula el ARQC con una LUK (`HMAC-SHA256(LUK, tokenRef|ATC|monto|moneda|UN)`) y escribe `crypto` → el POS autoriza en `/nfc/authorize` como con NFC → `result` por BLE → APROBADO + ticket ("VENTA · TAP BLUETOOTH").
+Secuencia: **COBRAR** → `sale` por BLE (+ NFC activo) → **toque físico** → el web calcula el ARQC con una LUK (`HMAC-SHA256(LUK, tokenRef|ATC|monto|moneda|UN)`) y escribe `crypto` → el POS autoriza en `/nfc/authorize` como con NFC → `result` por BLE → APROBADO + ticket ("VENTA · TAP BLUETOOTH" + línea "Proximidad: …").
+
+### Proximidad (v2.2 / web v8.70): Bluetooth no sabe de distancia, el toque lo pone el NFC
+
+Bluetooth LE llega a 10–30 m, así que el pago **no** se confirma a distancia: el web espera uno de estos dos toques y recién ahí manda el criptograma.
+
+| Toque | Quién lo detecta | Qué hace falta |
+|---|---|---|
+| El teléfono entra al **campo NFC del POS** | el POS (`onTagDiscovered`, solo ISO-DEP) → manda `tap` por BLE | que el teléfono responda al lector: tiene que tener algún HCE (motor D1, Google/Samsung Wallet). Un iPhone no responde. |
+| El teléfono lee un **sticker NFC pegado en el POS** | el teléfono, con Web NFC (`NDEFReader.scan()`, Chrome Android) → el UID del sticker viaja en `crypto.tag` | un sticker NTAG213/215 cualquiera (~USD 0,3), pegado en la carcasa **al lado** de la antena del POS, no encima; en el demo, fila «Toque por NFC» → permitir NFC. |
+
+El POS ignora los tags que no son ISO-DEP (el sticker queda en su campo sin molestar) y el ticket dice cómo se probó la cercanía (`campo NFC del POS` / `sticker NFC <UID>` / `sin toque`). La confirmación remota con huella («como si hubiera pagado desde otra habitación») solo existe si en Demo ⚙ se prende **«SDK2: confirmar sin acercar (demo)»**. En iPhone nada de esto corre: Safari no tiene Web Bluetooth ni Web NFC y el Secure Element solo se abre a apps nativas con entitlement de Apple, por eso el SDK2 en iPhone es narrativa simulada.
+
+Al tocar **COBRAR** el POS hace un `GET /nfc/events` de prueba: si el backend no responde, lo avisa debajo del importe (antes solo se veía «RECHAZADA · 96»).
 
 ## 5. Notas
 
