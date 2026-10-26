@@ -39,6 +39,8 @@ import java.util.Locale
 /**
  * D1 POS — terminal de demo: importe → "Acerque tarjeta o teléfono" → lectura EMV contactless → autorización en la
  * Lambda d1-nfc (valida ARQC con la LUK) → APROBADO / RECHAZADA → ticket (pantalla + impresora Bluetooth ESC/POS).
+ * SDK2: además es periférico Bluetooth LE (BleTap): el demo web en Chrome se conecta sin app, recibe la venta, manda el
+ * criptograma y recibe el resultado; el toque físico se detecta por NFC (si el teléfono responde) o lo confirma el usuario.
  */
 class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
@@ -66,6 +68,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private lateinit var merchantName: TextView
     private lateinit var foot: TextView
     private var nfc: NfcAdapter? = null
+    private var ble: BleTap? = null
+    private var blePhone = ""
+    private var saleUn = ""
     private var st = St.AMOUNT
     private var cents = 0L
     private var ticketNo = 317
@@ -104,6 +109,73 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         if (nfc == null) foot.text = "Este equipo no tiene NFC"
         paintMerchant()
         render()
+        ensureBle()
+    }
+
+    override fun onDestroy() { ble?.stop(); super.onDestroy() }
+
+    // ---------- SDK2: canal Bluetooth LE (periférico GATT) ----------
+    private fun blePerms(): Array<String> = if (Build.VERSION.SDK_INT >= 31) arrayOf(Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.BLUETOOTH_CONNECT) else emptyArray()
+
+    private fun ensureBle() {
+        val missing = blePerms().filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) { ActivityCompat.requestPermissions(this, missing.toTypedArray(), 10); return }
+        startBle()
+    }
+
+    private fun startBle() {
+        if (ble != null) return
+        val b = BleTap(this, object : BleTap.Listener {
+            override fun onBleStatus(text: String) { runOnUiThread { bleStatus = text; render() } }
+            override fun onPhone(connected: Boolean, name: String) {
+                runOnUiThread {
+                    blePhone = if (connected) name else ""
+                    if (connected && st == St.WAITING) sendSale()
+                    render()
+                }
+            }
+            override fun onCommand(cmd: JSONObject) {
+                runOnUiThread {
+                    when (cmd.optString("t")) {
+                        "crypto" -> authorizeBle(cmd)
+                        "cancel" -> if (st == St.WAITING || st == St.READING) cancelSale()
+                        else -> {}
+                    }
+                }
+            }
+        })
+        ble = b
+        if (!b.start()) ble = null
+    }
+
+    private var bleStatus = ""
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 10 && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) startBle()
+    }
+
+    private fun sendSale() {
+        ble?.send("sale", JSONObject().put("amount", cents).put("currency", currency).put("un", saleUn).put("merchant", merchant.name)
+            .put("merchantKey", merchant.key).put("mcc", merchant.mcc).put("terminal", terminalId).put("session", session))
+    }
+
+    /** Criptograma recibido por Bluetooth (web SDK2): misma autorización que el tap NFC. */
+    private fun authorizeBle(cmd: JSONObject) {
+        if (st != St.WAITING && st != St.READING) return
+        disableReader()
+        val r = EmvReader.Result(
+            kind = EmvReader.Kind.DATA,
+            aid = cmd.optString("aid", "A0000000041010"),
+            dpan = cmd.optString("dpan"),
+            arqc = cmd.optString("arqc"),
+            atc = cmd.optInt("atc"),
+            un = cmd.optString("un", saleUn),
+            log = listOf("BLE ← crypto " + cmd.optString("arqc").take(16) + " · ATC " + cmd.optInt("atc")),
+        )
+        apdu.text = r.log.joinToString("\n")
+        live("reading", JSONObject().put("via", "ble"))
+        authorize(r, viaBle = true)
     }
 
     private fun paintMerchant() {
@@ -155,13 +227,15 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
 
     private fun startSale() {
         st = St.WAITING; render()
+        saleUn = "%08X".format(java.security.SecureRandom().nextInt())
         enableReader()
         live("sale", JSONObject().put("cents", cents).put("currency", currency).put("merchant", merchant.key).put("mcc", merchant.mcc).put("terminal", terminalId))
+        if (blePhone.isNotEmpty()) sendSale()
     }
 
-    private fun cancelSale() { disableReader(); st = St.AMOUNT; render(); live("reset", JSONObject()) }
+    private fun cancelSale() { disableReader(); st = St.AMOUNT; render(); live("reset", JSONObject()); ble?.send("reset", JSONObject()) }
 
-    private fun newSale() { st = St.AMOUNT; cents = 0; apdu.text = ""; render(); live("reset", JSONObject()) }
+    private fun newSale() { st = St.AMOUNT; cents = 0; apdu.text = ""; render(); live("reset", JSONObject()); ble?.send("reset", JSONObject()) }
 
     private fun enableReader() {
         val a = nfc ?: return
@@ -177,6 +251,13 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     /** Callback de NfcAdapter.ReaderCallback: llegó un tag al campo. */
     override fun onTagDiscovered(tag: Tag) {
         if (st != St.WAITING && st != St.SEE_PHONE) return
+        if (blePhone.isNotEmpty() && st == St.WAITING) {
+            // SDK2: el teléfono conectado por BLE tocó el lector → le pedimos el criptograma por Bluetooth
+            runOnUiThread { setStatus(St.READING, "Teléfono detectado", "Bluetooth · esperando criptograma de " + blePhone); vibrate(40) }
+            live("reading", JSONObject().put("via", "ble"))
+            ble?.send("tap", JSONObject().put("un", saleUn).put("amount", cents).put("currency", currency))
+            return
+        }
         val iso = IsoDep.get(tag) ?: run { runOnUiThread { setStatus(St.NO_CARD, "No es una tarjeta EMV", "ISO-DEP no disponible") }; return }
         runOnUiThread { st = St.READING; render(); vibrate(40) }
         live("reading", JSONObject())
@@ -193,7 +274,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
-    private fun authorize(r: EmvReader.Result) {
+    private fun authorize(r: EmvReader.Result, viaBle: Boolean = false) {
         setStatus(St.AUTH, "Autorizando…", "ARQC " + r.arqc.take(8) + "… · ATC " + "%04d".format(r.atc) + " · token •••• " + r.dpan.takeLast(4))
         lifecycleScope.launch {
             val body = JSONObject().put("dpan", r.dpan).put("atc", r.atc).put("cryptogram", r.arqc).put("amount", cents).put("currency", currency)
@@ -202,7 +283,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             if (res.optBoolean("approved")) {
                 val auth = res.optString("authCode", "------")
                 ticketNo += 1; prefs.edit().putInt("ticket", ticketNo).apply()
-                lastReceipt = receipt(r, res, auth)
+                lastReceipt = receipt(r, res, auth, viaBle)
                 setStatus(St.APPROVED, "APROBADO", "Aut. $auth · " + schemeName(r.aid) + " •••• " + r.dpan.takeLast(4) + " · ticket ${"%06d".format(ticketNo)}")
                 vibrate(150)
                 if (printerMac.isNotEmpty()) printReceipt(lastReceipt)
@@ -210,12 +291,15 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 setStatus(St.DECLINED, "RECHAZADA", res.optString("de39", "05") + " · " + res.optString("reason", "declinada"))
                 vibrate(300)
             }
+            if (viaBle) ble?.send("result", JSONObject().put("approved", res.optBoolean("approved")).put("authCode", res.optString("authCode", "")).put("de39", res.optString("de39", ""))
+                .put("reason", res.optString("reason", "")).put("rrn", res.optString("rrn", "")).put("amount", cents).put("currency", currency).put("merchant", merchant.name)
+                .put("merchantKey", merchant.key).put("ticket", "%06d".format(ticketNo)).put("luksLeft", res.optInt("luksLeft", -1)).put("atc", r.atc))
         }
     }
 
     private fun schemeName(aid: String) = if (aid.startsWith("A0000000031010") || aid.startsWith("A0000000032010")) "Visa" else "Mastercard"
 
-    private fun receipt(r: EmvReader.Result, res: JSONObject, auth: String): List<String> {
+    private fun receipt(r: EmvReader.Result, res: JSONObject, auth: String, viaBle: Boolean = false): List<String> {
         val m = merchant
         val now = Date()
         return listOf(
@@ -225,9 +309,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             "=Ticket ${"%06d".format(ticketNo)}",
             "-",
             SimpleDateFormat("dd/MM/yyyy", Locale.US).format(now) + "              " + SimpleDateFormat("HH:mm", Locale.US).format(now),
-            "!VENTA · CONTACTLESS",
+            if (viaBle) "!VENTA · TAP BLUETOOTH" else "!VENTA · CONTACTLESS",
             schemeName(r.aid) + " •••• " + r.dpan.takeLast(4) + "        Token",
-            "D1 NFC Wallet · HCE          Telefono",
+            if (viaBle) "D1 Wallet SDK2 · BLE         Telefono" else "D1 NFC Wallet · HCE          Telefono",
             "AID " + r.aid,
             "ATC " + "%04d".format(r.atc) + "   ARQC " + r.arqc.take(8) + "…",
             "CDCVM ✓ biometria        Sin firma",
@@ -260,7 +344,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         label.text = when (st) { St.AMOUNT -> "IMPORTE"; St.WAITING, St.READING, St.SEE_PHONE -> "TOTAL A PAGAR"; else -> "TOTAL" }
         when (st) {
             St.AMOUNT -> { status.text = ""; detail.text = "Ingresá el importe y tocá COBRAR"; bigIcon.text = "" }
-            St.WAITING -> { status.text = "Acerque tarjeta o teléfono"; detail.text = "NFC activo · " + merchant.name; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0ea5e9")) }
+            St.WAITING -> { status.text = "Acerque tarjeta o teléfono"; detail.text = (if (blePhone.isNotEmpty()) "Bluetooth · " + blePhone + " · " else "NFC activo · ") + merchant.name; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0ea5e9")) }
             St.READING -> { status.text = "Leyendo… no retire"; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0369a1")) }
             St.SEE_PHONE -> { bigIcon.text = "📱"; bigIcon.setTextColor(Color.parseColor("#f59e0b")) }
             St.AUTH -> { bigIcon.text = "⋯"; bigIcon.setTextColor(Color.parseColor("#0369a1")) }
@@ -272,7 +356,13 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         btnMain.text = when (st) { St.AMOUNT -> "COBRAR"; St.APPROVED, St.DECLINED, St.NO_CARD -> "NUEVA VENTA"; else -> "CANCELAR" }
         btnMain.setBackgroundColor(Color.parseColor(when (st) { St.AMOUNT -> if (cents > 0) "#16a34a" else "#9ca3af"; St.APPROVED, St.DECLINED, St.NO_CARD -> "#1a5fa0"; else -> "#6b7280" }))
         merchantSp.isEnabled = st == St.AMOUNT
-        foot.text = (if (session.isNotEmpty()) "Live · sesión $session · " else "") + (if (printerMac.isNotEmpty()) "impresora BT ✓" else "sin impresora") + " · " + currency
+        val bleTxt = when {
+            blePhone.isNotEmpty() -> "BLE ✓ " + blePhone
+            ble?.advertising == true -> "BLE listo"
+            bleStatus.isNotEmpty() -> bleStatus
+            else -> "BLE –"
+        }
+        foot.text = (if (session.isNotEmpty()) "Live · sesión $session · " else "") + (if (printerMac.isNotEmpty()) "impresora BT ✓" else "sin impresora") + " · " + currency + " · " + bleTxt
     }
 
     private fun live(type: String, data: JSONObject) {
@@ -297,6 +387,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val spPr = Spinner(this).apply { adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, names); setSelection((printers.indexOfFirst { it.address == printerMac } + 1).coerceAtLeast(0)) }
         val lbl = { t: String -> TextView(this).apply { text = t; setTextColor(Color.GRAY); textSize = 12f; setPadding(0, pad / 2, 0, 0) } }
         box.addView(eApi); box.addView(eSes); box.addView(eTerm); box.addView(lbl("Moneda")); box.addView(spCur); box.addView(lbl("Impresora Bluetooth (emparejada)")); box.addView(spPr)
+        box.addView(lbl("Tap Bluetooth (SDK2): " + when { ble == null -> if (bleStatus.isNotEmpty()) bleStatus else "sin permisos / no soportado"; blePhone.isNotEmpty() -> "teléfono conectado · $blePhone"; ble?.advertising == true -> "anunciando, esperando teléfono"; else -> bleStatus }))
         val btnTest = Button(this).apply { text = "Imprimir ticket de prueba"; gravity = Gravity.CENTER }
         box.addView(btnTest)
         val dlg = AlertDialog.Builder(this).setTitle("D1 POS · configuración").setView(box)
