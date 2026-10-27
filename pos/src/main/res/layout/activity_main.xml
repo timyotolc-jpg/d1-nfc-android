@@ -88,6 +88,14 @@
             android:layout_weight="1"
             android:orientation="vertical"
             android:gravity="center">
+            <ImageView
+                android:id="@+id/brandImg"
+                android:layout_width="200dp"
+                android:layout_height="120dp"
+                android:layout_marginBottom="8dp"
+                android:scaleType="fitCenter"
+                android:contentDescription="brand"
+                android:visibility="gone" />
             <TextView
                 android:id="@+id/brand"
                 android:layout_width="wrap_content"
