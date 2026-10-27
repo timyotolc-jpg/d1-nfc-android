@@ -19,6 +19,15 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.graphics.BitmapFactory
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -29,6 +38,7 @@ import io.argenticpay.d1wallet.Backend
 import io.argenticpay.d1wallet.Emv
 import io.argenticpay.d1wallet.HceUtil
 import io.argenticpay.d1wallet.NfcEvents
+import io.argenticpay.d1wallet.R
 import io.argenticpay.d1wallet.Relay
 import io.argenticpay.d1wallet.WalletStore
 import kotlinx.coroutines.launch
@@ -46,7 +56,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var store: WalletStore
     private lateinit var backend: Backend
     private val prefs by lazy { getSharedPreferences("d1showcase", MODE_PRIVATE) }
-    private val home get() = prefs.getString("home", "index.html") ?: "index.html"
+    // v1.2: inicio = marca blanca (index1.html: elegís el banco); Demo ⚙ → «Cambiar inicio» pasa a DigiBank (index.html)
+    private val home get() = prefs.getString("home", "index1.html") ?: "index1.html"
     private val base get() = prefs.getString("base", BASE) ?: BASE
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -85,6 +96,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String) {
                 // la web ya está: le avisamos el estado del motor (window.d1NativeEvent lo espera al montar)
                 emit(JSONObject().put("type", "nativeReady").put("state", state()))
+                injectPushBridge()
             }
         }
         web.webChromeClient = object : WebChromeClient() {
@@ -97,7 +109,103 @@ class MainActivity : AppCompatActivity() {
         }
         NfcEvents.sink = { ev -> emit(ev) }
         askPermissions()
+        immersive()
         web.loadUrl(base + "/" + home)
+        handlePushIntent(intent)
+    }
+
+    /** v1.2: pantalla completa — sin la barra de navegación (atrás / inicio / recientes); un deslizamiento desde el borde
+     *  la muestra un momento y se vuelve a esconder. La barra de estado (hora, batería) queda: la app se ve como una real. */
+    private fun immersive() {
+        runCatching {
+            WindowCompat.setDecorFitsSystemWindows(window, true)
+            val c = WindowInsetsControllerCompat(window, web)
+            c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            c.hide(WindowInsetsCompat.Type.navigationBars())
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) immersive() }
+
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); handlePushIntent(intent) }
+
+    /** el usuario tocó una notificación real → la web ejecuta el onOpen del push (misma acción que tocar el banner) */
+    private fun handlePushIntent(i: Intent?) {
+        val id = i?.getStringExtra(EXTRA_PUSH) ?: return
+        i.removeExtra(EXTRA_PUSH)
+        runCatching { NotificationManagerCompat.from(this).cancel(id.hashCode()) }
+        web.postDelayed({ web.evaluateJavascript("window.__d1PushTap && window.__d1PushTap(" + JSONObject.quote(id) + ")", null) }, 150)
+    }
+
+    // ---------- v1.2: push real — los avisos que la web dibuja adentro del teléfono salen como notificaciones de Android ----------
+    private fun ensureChannel() {
+        if (Build.VERSION.SDK_INT < 26) return
+        val nm = getSystemService(NotificationManager::class.java)
+        if (nm.getNotificationChannel(CH_PUSH) == null) {
+            val ch = NotificationChannel(CH_PUSH, "Banco D1 · avisos", NotificationManager.IMPORTANCE_HIGH)
+            ch.description = "Solicitudes de autenticación, compras aprobadas y OTP de la demo"
+            ch.enableVibration(true)
+            nm.createNotificationChannel(ch)
+        }
+    }
+
+    private fun notifyPush(id: String, app: String?, title: String?, body: String?): Boolean {
+        ensureChannel()
+        val open = Intent(this, MainActivity::class.java).apply { action = ACTION_PUSH + id; putExtra(EXTRA_PUSH, id); addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP) }
+        val pi = PendingIntent.getActivity(this, id.hashCode(), open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val large = runCatching { BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher) }.getOrNull()
+        val n = NotificationCompat.Builder(this, CH_PUSH)
+            .setSmallIcon(R.drawable.ic_notif)
+            .setLargeIcon(large)
+            .setContentTitle(title ?: (app ?: "Banco D1"))
+            .setContentText(body ?: "")
+            .setSubText(app)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body ?: ""))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setAutoCancel(true)
+            .setTimeoutAfter(90_000)
+            .setContentIntent(pi)
+            .build()
+        val nm = NotificationManagerCompat.from(this)
+        val allowed = nm.areNotificationsEnabled() && (Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+        return allowed && runCatching { nm.notify(id.hashCode(), n) }.isSuccess
+    }
+
+    /** puente DOM → notificación: observa los banners .pushwrap que dibuja la web, los esconde (quedan en el DOM para el
+     *  onClick) y manda cada uno como notificación real; al desaparecer el banner se cancela; el toque llama a __d1PushTap. */
+    private fun injectPushBridge() {
+        val js = """
+          (function(){
+            if (window.__d1np) return; window.__d1np = 1;
+            var st = document.createElement('style');
+            st.textContent = '.pushwrap.d1-native-push{opacity:0!important;pointer-events:none!important}';
+            document.head.appendChild(st);
+            var byEl = new Map(), byId = new Map(), n = 0;
+            var txt = function(el, sel){ var x = el.querySelector(sel); return x ? (x.textContent || '').trim() : ''; };
+            var sigOf = function(el){ return [txt(el, '.prow b'), txt(el, '.ptitle'), txt(el, '.ptxt > span')].join('|'); };
+            var drop = function(el){ var r = byEl.get(el); if (!r) return; byEl.delete(el); byId.delete(r.id); try { window.D1Native.cancelNotify(r.id); } catch (e) {} };
+            var post = function(el){
+              var sig = sigOf(el), cur = byEl.get(el);
+              if (cur && cur.sig === sig) return;
+              if (cur) drop(el);
+              var id = 'p' + Date.now() + '_' + (++n), parts = sig.split('|'), ok = false;
+              try { ok = window.D1Native.notify(id, parts[0], parts[1], parts[2]) === true; } catch (e) {}
+              byEl.set(el, { id: id, sig: sig }); byId.set(id, el);
+              if (ok) el.classList.add('d1-native-push');   // sin permiso de notificaciones, el banner se sigue viendo adentro
+            };
+            var scan = function(){
+              var live = document.querySelectorAll('.pushwrap');
+              live.forEach(post);
+              byEl.forEach(function(r, el){ if (!document.body.contains(el)) drop(el); });
+            };
+            new MutationObserver(function(){ scan(); }).observe(document.body, { childList: true, subtree: true, characterData: true });
+            scan();
+            window.__d1PushTap = function(id){ var el = byId.get(id); if (el) { el.click(); return true; } return false; };
+          })();
+        """.trimIndent()
+        web.evaluateJavascript(js, null)
     }
 
     override fun onDestroy() { NfcEvents.sink = null; super.onDestroy() }
@@ -233,11 +341,18 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun openExternal(url: String?) {
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url ?: BASE))) }
         }
+
+        /** v1.2: push real (lo usa el puente DOM inyectado; también puede llamarlo la web directamente) */
+        @JavascriptInterface fun notify(id: String?, app: String?, title: String?, body: String?): Boolean = notifyPush(id ?: ("p" + System.currentTimeMillis()), app, title, body)
+        @JavascriptInterface fun cancelNotify(id: String?) { id?.let { runCatching { NotificationManagerCompat.from(this@MainActivity).cancel(it.hashCode()) } } }
     }
 
     companion object {
         const val HOST = "sdk.argenticpay.io"
         const val BASE = "https://sdk.argenticpay.io"
-        const val BuildConfig_VERSION = "1.1"
+        const val BuildConfig_VERSION = "1.2"
+        const val CH_PUSH = "d1_push"
+        const val EXTRA_PUSH = "d1.push"
+        const val ACTION_PUSH = "io.argenticpay.d1showcase.PUSH."
     }
 }
