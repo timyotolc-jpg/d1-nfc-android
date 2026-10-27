@@ -30,6 +30,9 @@ object EscPos {
         sock.close()
     }
 
+    /** mismo render ESC/POS sobre cualquier OutputStream (Bluetooth SPP o puerto serie interno) */
+    fun writeTo(o: OutputStream, lines: List<String>) = write(o, lines)
+
     private fun write(o: OutputStream, lines: List<String>) {
         o.write(byteArrayOf(0x1B, 0x40))                  // init
         for (raw in lines) {

@@ -63,6 +63,9 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private lateinit var detail: TextView
     private lateinit var apdu: TextView
     private lateinit var bigIcon: TextView
+    private lateinit var brandTv: TextView
+    private val printerDev get() = prefs.getString("printerDev", "") ?: ""
+    private var player: android.media.MediaPlayer? = null
     private lateinit var keys: GridLayout
     private lateinit var btnMain: Button
     private lateinit var merchantSp: Spinner
@@ -99,7 +102,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         prefs = getSharedPreferences("d1pos", Context.MODE_PRIVATE)
         ticketNo = prefs.getInt("ticket", 317)
         amountTv = findViewById(R.id.amount); label = findViewById(R.id.label); status = findViewById(R.id.status)
-        detail = findViewById(R.id.detail); apdu = findViewById(R.id.apdu); bigIcon = findViewById(R.id.bigIcon)
+        detail = findViewById(R.id.detail); apdu = findViewById(R.id.apdu); bigIcon = findViewById(R.id.bigIcon); brandTv = findViewById(R.id.brand)
         keys = findViewById(R.id.keys); btnMain = findViewById(R.id.btnMain); merchantSp = findViewById(R.id.merchant)
         merchantName = findViewById(R.id.merchantName); foot = findViewById(R.id.foot)
         findViewById<TextView>(R.id.terminal).text = terminalId
@@ -304,16 +307,18 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 log = listOf("TAP SIMPLE · $prox", "backend → cloud cryptogram " + res.optString("cryptogram", "").take(16) + " · ATC " + res.optInt("atc", 0)),
             )
             apdu.text = r.log.joinToString("\n")
-            if (res.optBoolean("approved")) {
-                val auth = res.optString("authCode", "------")
-                ticketNo += 1; prefs.edit().putInt("ticket", ticketNo).apply()
-                lastReceipt = receipt(r, res, auth, viaBle = false, simple = true)
-                setStatus(St.APPROVED, "APROBADO", "Aut. $auth · " + schemeName(r.aid) + " •••• " + r.dpan.takeLast(4) + " · ticket ${"%06d".format(ticketNo)}")
-                vibrate(150)
-                if (printerMac.isNotEmpty()) printReceipt(lastReceipt)
-            } else {
-                setStatus(St.DECLINED, "RECHAZADA", res.optString("de39", "05") + " · " + res.optString("reason", "declinada"))
-                vibrate(300)
+            approvalSequence(r.aid, r.atc, r.arqc, res.optBoolean("approved")) {
+                if (res.optBoolean("approved")) {
+                    val auth = res.optString("authCode", "------")
+                    ticketNo += 1; prefs.edit().putInt("ticket", ticketNo).apply()
+                    lastReceipt = receipt(r, res, auth, viaBle = false, simple = true)
+                    setStatus(St.APPROVED, "APROBADO", "Aut. $auth · " + schemeName(r.aid) + " •••• " + r.dpan.takeLast(4) + " · ticket ${"%06d".format(ticketNo)}")
+                    vibrate(150)
+                    printIfConfigured(lastReceipt)
+                } else {
+                    setStatus(St.DECLINED, "RECHAZADA", res.optString("de39", "05") + " · " + res.optString("reason", "declinada"))
+                    vibrate(300)
+                }
             }
         }
     }
@@ -379,10 +384,10 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         if (tapSimple && st == St.WAITING) {
             // v2.3 tap simple: con que un teléfono entre al campo alcanza; el backend cobra el token de la sesión
             if (session.isEmpty()) { runOnUiThread { setStatus(St.WAITING, "Falta la sesión Live", "Tap simple: poné en ⚙ el código de 4 dígitos de Demo ⚙ «Sesión Live»") ; vibrate(80) }; return }
-            runOnUiThread { vibrate(40); authorizeSimple("campo NFC del POS", "") }
+            runOnUiThread { vibrate(40); sound(R.raw.snd_tap); authorizeSimple("campo NFC del POS", "") }
             return
         }
-        runOnUiThread { st = St.READING; render(); vibrate(40) }
+        runOnUiThread { st = St.READING; render(); vibrate(40); sound(R.raw.snd_tap) }
         live("reading", JSONObject())
         lifecycleScope.launch {
             val reader = EmvReader(cents, EmvReader.CURRENCY[currency] ?: "0840", EmvReader.COUNTRY[currency] ?: "0840")
@@ -397,26 +402,72 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
+    // ---------- v2.5: experiencia de terminal — marca, sonidos y tiempos ----------
+    private fun sound(resId: Int) {
+        runCatching {
+            player?.release()
+            player = android.media.MediaPlayer.create(this, resId)?.apply { setOnCompletionListener { it.release(); if (player === it) player = null }; start() }
+        }
+    }
+
+    /** nombre y color de la marca por AID (solo texto: los logos y sonidos oficiales son activos de cada marca; si los tenés,
+     *  reemplazá res/raw/snd_visa.wav y snd_mc.wav y la app los usa tal cual) */
+    private fun brand(aid: String): Pair<String, String> = if (aid.startsWith("A0000000031010") || aid.startsWith("A0000000032010")) "VISA" to "#1a1f71" else "Mastercard" to "#eb001b"
+
+    private fun showBrand(aid: String?) {
+        if (aid.isNullOrEmpty()) { brandTv.visibility = View.GONE; return }
+        val (name, color) = brand(aid)
+        brandTv.text = name; brandTv.setTextColor(Color.parseColor(color)); brandTv.visibility = View.VISIBLE
+    }
+
+    /** Leyendo → marca → autorizando → resultado, con los tiempos de una terminal real (~2,5 s) */
+    private fun approvalSequence(aid: String, atc: Int, arqc: String, approved: Boolean, onDone: () -> Unit) {
+        val (name, _) = brand(aid)
+        lifecycleScope.launch {
+            setStatus(St.READING, "Leyendo tarjeta…", "SELECT PPSE → AID " + aid.take(10) + "… · " + name)
+            showBrand(null)
+            kotlinx.coroutines.delay(650)
+            showBrand(aid)
+            setStatus(St.AUTH, "Tarjeta $name", "GPO → criptograma ARQC " + arqc.take(8) + "… · ATC " + "%04d".format(atc))
+            kotlinx.coroutines.delay(750)
+            setStatus(St.AUTH, "Autorizando…", "0100 → red $name → emisor · esperando 0110")
+            kotlinx.coroutines.delay(900)
+            onDone()
+            sound(if (!approved) R.raw.snd_decline else if (name == "VISA") R.raw.snd_visa else R.raw.snd_mc)
+        }
+    }
+
+    private fun printIfConfigured(lines: List<String>) {
+        if (printerDev.isNotEmpty()) {
+            lifecycleScope.launch {
+                val r = withContext(Dispatchers.IO) { InternalPrinter.print(printerDev, lines) }
+                foot.text = if (r.isSuccess) "Ticket impreso ✓ (interna)" else "Impresora interna: " + (r.exceptionOrNull()?.message ?: "error")
+            }
+        } else if (printerMac.isNotEmpty()) printReceipt(lines)
+    }
+
     private fun authorize(r: EmvReader.Result, viaBle: Boolean = false) {
         setStatus(St.AUTH, "Autorizando…", "ARQC " + r.arqc.take(8) + "… · ATC " + "%04d".format(r.atc) + " · token •••• " + r.dpan.takeLast(4))
         lifecycleScope.launch {
             val body = JSONObject().put("dpan", r.dpan).put("atc", r.atc).put("cryptogram", r.arqc).put("amount", cents).put("currency", currency)
                 .put("un", r.un).put("merchant", merchant.name).put("mcc", merchant.mcc).put("terminal", terminalId).put("session", session).put("aid", r.aid)
             val res = runCatching { backend.post("/nfc/authorize", body) }.getOrElse { JSONObject().put("approved", false).put("de39", "96").put("reason", "sin conexión: " + it.message) }
-            if (res.optBoolean("approved")) {
-                val auth = res.optString("authCode", "------")
-                ticketNo += 1; prefs.edit().putInt("ticket", ticketNo).apply()
-                lastReceipt = receipt(r, res, auth, viaBle)
-                setStatus(St.APPROVED, "APROBADO", "Aut. $auth · " + schemeName(r.aid) + " •••• " + r.dpan.takeLast(4) + " · ticket ${"%06d".format(ticketNo)}")
-                vibrate(150)
-                if (printerMac.isNotEmpty()) printReceipt(lastReceipt)
-            } else {
-                setStatus(St.DECLINED, "RECHAZADA", res.optString("de39", "05") + " · " + res.optString("reason", "declinada"))
-                vibrate(300)
+            approvalSequence(r.aid, r.atc, r.arqc, res.optBoolean("approved")) {
+                if (res.optBoolean("approved")) {
+                    val auth = res.optString("authCode", "------")
+                    ticketNo += 1; prefs.edit().putInt("ticket", ticketNo).apply()
+                    lastReceipt = receipt(r, res, auth, viaBle)
+                    setStatus(St.APPROVED, "APROBADO", "Aut. $auth · " + schemeName(r.aid) + " •••• " + r.dpan.takeLast(4) + " · ticket ${"%06d".format(ticketNo)}")
+                    vibrate(150)
+                    printIfConfigured(lastReceipt)
+                } else {
+                    setStatus(St.DECLINED, "RECHAZADA", res.optString("de39", "05") + " · " + res.optString("reason", "declinada"))
+                    vibrate(300)
+                }
+                if (viaBle) ble?.send("result", JSONObject().put("approved", res.optBoolean("approved")).put("authCode", res.optString("authCode", "")).put("de39", res.optString("de39", ""))
+                    .put("reason", res.optString("reason", "")).put("rrn", res.optString("rrn", "")).put("amount", cents).put("currency", currency).put("merchant", merchant.name)
+                    .put("merchantKey", merchant.key).put("ticket", "%06d".format(ticketNo)).put("luksLeft", res.optInt("luksLeft", -1)).put("atc", r.atc))
             }
-            if (viaBle) ble?.send("result", JSONObject().put("approved", res.optBoolean("approved")).put("authCode", res.optString("authCode", "")).put("de39", res.optString("de39", ""))
-                .put("reason", res.optString("reason", "")).put("rrn", res.optString("rrn", "")).put("amount", cents).put("currency", currency).put("merchant", merchant.name)
-                .put("merchantKey", merchant.key).put("ticket", "%06d".format(ticketNo)).put("luksLeft", res.optInt("luksLeft", -1)).put("atc", r.atc))
         }
     }
 
@@ -467,8 +518,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         bigIcon.visibility = if (st == St.AMOUNT) View.GONE else View.VISIBLE
         label.text = when (st) { St.AMOUNT -> "IMPORTE"; St.WAITING, St.READING, St.SEE_PHONE -> "TOTAL A PAGAR"; else -> "TOTAL" }
         when (st) {
-            St.AMOUNT -> { status.text = ""; detail.text = "Ingresá el importe y tocá COBRAR"; bigIcon.text = "" }
-            St.WAITING -> { status.text = "Acerque tarjeta o teléfono"; detail.text = (if (blePhone.isNotEmpty()) "Bluetooth · " + blePhone + " · " else nfcStatus() + " · ") + merchant.name; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0ea5e9")) }
+            St.AMOUNT -> { status.text = ""; detail.text = "Ingresá el importe y tocá COBRAR"; bigIcon.text = ""; brandTv.visibility = View.GONE }
+            St.WAITING -> { status.text = "Acerque tarjeta o teléfono"; detail.text = (if (blePhone.isNotEmpty()) "Bluetooth · " + blePhone + " · " else nfcStatus() + " · ") + merchant.name; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0ea5e9")); brandTv.visibility = View.GONE }
             St.READING -> { status.text = "Leyendo… no retire"; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0369a1")) }
             St.SEE_PHONE -> { bigIcon.text = "📱"; bigIcon.setTextColor(Color.parseColor("#f59e0b")) }
             St.AUTH -> { bigIcon.text = "⋯"; bigIcon.setTextColor(Color.parseColor("#0369a1")) }
@@ -486,7 +537,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             bleStatus.isNotEmpty() -> bleStatus
             else -> "BLE –"
         }
-        foot.text = (if (session.isNotEmpty()) "Live · sesión $session · " else "") + (if (tapSimple) "tap simple · " else "EMV · ") + (if (printerMac.isNotEmpty()) "impresora BT ✓" else "sin impresora") + " · " + currency + " · " + bleTxt
+        foot.text = (if (session.isNotEmpty()) "Live · sesión $session · " else "") + (if (tapSimple) "tap simple · " else "EMV · ") + (if (printerDev.isNotEmpty()) "impresora interna ✓" else if (printerMac.isNotEmpty()) "impresora BT ✓" else "sin impresora") + " · " + currency + " · " + bleTxt
     }
 
     private fun live(type: String, data: JSONObject) {
@@ -516,6 +567,22 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         box.addView(lbl("Tap Bluetooth (SDK2): " + when { ble == null -> if (bleStatus.isNotEmpty()) bleStatus else "sin permisos / no soportado"; blePhone.isNotEmpty() -> "teléfono conectado · $blePhone"; ble?.advertising == true -> "anunciando, esperando teléfono"; else -> bleStatus }))
         val btnTest = Button(this).apply { text = "Imprimir ticket de prueba"; gravity = Gravity.CENTER }
         box.addView(btnTest)
+        val avail = InternalPrinter.available()
+        box.addView(lbl("Impresora interna (puerto serie): " + (if (printerDev.isNotEmpty()) "usando $printerDev" else if (avail.isEmpty()) "no se ven puertos escribibles" else "puertos: " + avail.joinToString(", "))))
+        val btnInt = Button(this).apply { text = if (printerDev.isNotEmpty()) "Olvidar impresora interna" else "Probar impresora interna"; gravity = Gravity.CENTER }
+        box.addView(btnInt)
+        btnInt.setOnClickListener {
+            if (printerDev.isNotEmpty()) { prefs.edit().remove("printerDev").apply(); Toast.makeText(this, "Impresora interna olvidada", Toast.LENGTH_SHORT).show(); render(); return@setOnClickListener }
+            lifecycleScope.launch {
+                val ok = withContext(Dispatchers.IO) { InternalPrinter.probe() }
+                if (ok.isEmpty()) Toast.makeText(this@MainActivity, "Ningún puerto aceptó la impresión. Mandame el SDK de Scangle y la integro.", Toast.LENGTH_LONG).show()
+                else {
+                    prefs.edit().putString("printerDev", ok.first()).apply()
+                    Toast.makeText(this@MainActivity, "Salió por " + ok.joinToString(", ") + " · guardado " + ok.first() + " (si el papel no se movió, tocá Olvidar)", Toast.LENGTH_LONG).show()
+                }
+                render()
+            }
+        }
         val dlg = AlertDialog.Builder(this).setTitle("D1 POS · configuración").setView(box)
             .setPositiveButton("Guardar") { _, _ ->
                 prefs.edit().putString("api", eApi.text.toString().trim()).putString("session", eSes.text.toString().trim()).putString("terminal", eTerm.text.toString().trim())

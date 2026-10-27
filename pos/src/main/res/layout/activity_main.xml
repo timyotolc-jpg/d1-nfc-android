@@ -89,6 +89,22 @@
             android:orientation="vertical"
             android:gravity="center">
             <TextView
+                android:id="@+id/brand"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:paddingLeft="14dp"
+                android:paddingRight="14dp"
+                android:paddingTop="4dp"
+                android:paddingBottom="4dp"
+                android:background="#ffffff"
+                android:text=""
+                android:textColor="#111111"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.04"
+                android:visibility="gone" />
+            <TextView
                 android:id="@+id/bigIcon"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
