@@ -416,12 +416,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private fun brand(aid: String): Pair<String, String> = if (aid.startsWith("A0000000031010") || aid.startsWith("A0000000032010")) "VISA" to "#1a1f71" else "Mastercard" to "#eb001b"
 
     /** logo oficial si está en res/drawable (logo_mc.png / logo_visa.png, los provee el cliente); si no, el nombre en texto */
-    private fun brandLogo(aid: String): Int = resources.getIdentifier(if (brand(aid).first == "VISA") "logo_visa" else "logo_mc", "drawable", packageName)
+    private fun brandLogo(aid: String, onDark: Boolean = false): Int = resources.getIdentifier(if (brand(aid).first == "VISA") (if (onDark) "logo_visa_white" else "logo_visa") else "logo_mc", "drawable", packageName)
 
     private fun showBrand(aid: String?, big: Boolean = false, onDark: Boolean = false) {
         if (aid.isNullOrEmpty()) { brandTv.visibility = View.GONE; brandImg.visibility = View.GONE; return }
         val (name, color) = brand(aid)
-        val logo = brandLogo(aid)
+        val logo = brandLogo(aid, onDark)
         if (logo != 0) {
             brandImg.setImageResource(logo); brandImg.visibility = View.VISIBLE; brandTv.visibility = View.GONE
             val lp = brandImg.layoutParams; val d = resources.displayMetrics.density

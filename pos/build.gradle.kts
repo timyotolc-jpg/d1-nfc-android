@@ -11,8 +11,8 @@ android {
         applicationId = "io.argenticpay.d1pos"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "2.6"
+        versionCode = 9
+        versionName = "2.7"
     }
     buildTypes {
         release { isMinifyEnabled = false }
