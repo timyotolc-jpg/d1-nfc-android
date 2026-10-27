@@ -89,6 +89,14 @@
             android:orientation="vertical"
             android:gravity="center">
             <ImageView
+                android:id="@+id/waveImg"
+                android:layout_width="96dp"
+                android:layout_height="96dp"
+                android:layout_marginBottom="6dp"
+                android:src="@drawable/ic_contactless"
+                android:contentDescription="contactless"
+                android:visibility="gone" />
+            <ImageView
                 android:id="@+id/brandImg"
                 android:layout_width="200dp"
                 android:layout_height="120dp"

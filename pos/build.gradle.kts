@@ -11,8 +11,8 @@ android {
         applicationId = "io.argenticpay.d1pos"
         minSdk = 26
         targetSdk = 34
-        versionCode = 11
-        versionName = "2.9"
+        versionCode = 12
+        versionName = "3.0"
     }
     // Firma estable (misma upload key que el motor): así cada versión se instala ENCIMA de la anterior y la configuración
     // (sesión, impresora, moneda) no se pierde. Antes el APK iba firmado con una debug key nueva en cada build de CI y

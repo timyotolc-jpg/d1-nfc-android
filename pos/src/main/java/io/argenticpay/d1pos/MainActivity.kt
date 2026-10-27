@@ -65,6 +65,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private lateinit var bigIcon: TextView
     private lateinit var brandTv: TextView
     private lateinit var brandImg: android.widget.ImageView
+    private lateinit var waveImg: android.widget.ImageView
     private val printerDev get() = prefs.getString("printerDev", "") ?: ""
     private var player: android.media.MediaPlayer? = null
     private lateinit var keys: GridLayout
@@ -103,7 +104,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         prefs = getSharedPreferences("d1pos", Context.MODE_PRIVATE)
         ticketNo = prefs.getInt("ticket", 317)
         amountTv = findViewById(R.id.amount); label = findViewById(R.id.label); status = findViewById(R.id.status)
-        detail = findViewById(R.id.detail); apdu = findViewById(R.id.apdu); bigIcon = findViewById(R.id.bigIcon); brandTv = findViewById(R.id.brand); brandImg = findViewById(R.id.brandImg)
+        detail = findViewById(R.id.detail); apdu = findViewById(R.id.apdu); bigIcon = findViewById(R.id.bigIcon); brandTv = findViewById(R.id.brand); brandImg = findViewById(R.id.brandImg); waveImg = findViewById(R.id.waveImg)
         keys = findViewById(R.id.keys); btnMain = findViewById(R.id.btnMain); merchantSp = findViewById(R.id.merchant)
         merchantName = findViewById(R.id.merchantName); foot = findViewById(R.id.foot)
         findViewById<TextView>(R.id.terminal).text = terminalId
@@ -383,16 +384,28 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             return
         }
         if (tapSimple && st == St.WAITING) {
-            // v2.3 tap simple: con que un teléfono entre al campo alcanza; el backend cobra el token de la sesión
-            if (session.isEmpty()) { runOnUiThread { setStatus(St.WAITING, "Falta la sesión Live", "Tap simple: poné en ⚙ el código de 4 dígitos de Demo ⚙ «Sesión Live»") ; vibrate(80) }; return }
-            runOnUiThread { vibrate(40); sound(R.raw.snd_tap); authorizeSimple("campo NFC del POS", "") }
-            return
+            // v3.0: si del otro lado está el motor D1 (app D1 Showcase o d1-wallet), va el EMV real: CDCVM, biometría con el
+            // teléfono bloqueado, criptograma del teléfono. Si es cualquier otro teléfono → tap simple (token de la sesión).
+            val d1 = runCatching {
+                iso.timeout = 1500
+                if (!iso.isConnected) iso.connect()
+                val r = iso.transceive(Tlv.bytes("00A404000E") + Tlv.bytes(EmvReader.PPSE) + Tlv.bytes("00"))
+                val ok = r.size >= 2 && Tlv.hex(r.copyOfRange(r.size - 2, r.size)) == "9000"
+                ok && (Tlv.parse(r.copyOfRange(0, r.size - 2))["DF01"]?.let { String(it) } == "D1NFC")
+            }.getOrDefault(false)
+            if (!d1) {
+                runCatching { iso.close() }
+                if (session.isEmpty()) { runOnUiThread { setStatus(St.WAITING, "Falta la sesión Live", "Tap simple: poné en ⚙ el código de 4 dígitos de Demo ⚙ «Sesión Live»") ; vibrate(80) }; return }
+                runOnUiThread { vibrate(40); sound(R.raw.snd_tap); authorizeSimple("campo NFC del POS", "") }
+                return
+            }
+            Log.d("D1POS", "motor D1 detectado → EMV real")
         }
         runOnUiThread { st = St.READING; render(); vibrate(40); sound(R.raw.snd_tap) }
         live("reading", JSONObject())
         lifecycleScope.launch {
             val reader = EmvReader(cents, EmvReader.CURRENCY[currency] ?: "0840", EmvReader.COUNTRY[currency] ?: "0840")
-            val r = withContext(Dispatchers.IO) { runCatching { iso.connect(); reader.run(iso) }.getOrElse { EmvReader.Result(EmvReader.Kind.ERROR, error = it.toString()) } }
+            val r = withContext(Dispatchers.IO) { runCatching { if (!iso.isConnected) iso.connect(); reader.run(iso) }.getOrElse { EmvReader.Result(EmvReader.Kind.ERROR, error = it.toString()) } }
             apdu.text = r.log.takeLast(6).joinToString("\n")
             when (r.kind) {
                 EmvReader.Kind.NO_CARD -> { disableReader(); setStatus(St.NO_CARD, "TARJETA NO RECONOCIDA", "Use otra tarjeta · " + r.error); live("nocard", JSONObject().put("error", r.error)) }
@@ -416,7 +429,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
     private fun brand(aid: String): Pair<String, String> = if (aid.startsWith("A0000000031010") || aid.startsWith("A0000000032010")) "VISA" to "#1a1f71" else "Mastercard" to "#eb001b"
 
     /** logo oficial si está en res/drawable (logo_mc.png / logo_visa.png, los provee el cliente); si no, el nombre en texto */
-    private fun brandLogo(aid: String, onDark: Boolean = false): Int = resources.getIdentifier(if (brand(aid).first == "VISA") (if (onDark) "logo_visa_white" else "logo_visa") else "logo_mc", "drawable", packageName)
+    private fun brandLogo(aid: String, onDark: Boolean = false): Int = resources.getIdentifier(if (brand(aid).first == "VISA") "logo_visa" else "logo_mc", "drawable", packageName)
 
     private fun showBrand(aid: String?, big: Boolean = false, onDark: Boolean = false) {
         if (aid.isNullOrEmpty()) { brandTv.visibility = View.GONE; brandImg.visibility = View.GONE; return }
@@ -425,7 +438,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         if (logo != 0) {
             brandImg.setImageResource(logo); brandImg.visibility = View.VISIBLE; brandTv.visibility = View.GONE
             val lp = brandImg.layoutParams; val d = resources.displayMetrics.density
-            lp.width = ((if (big) 260 else 120) * d).toInt(); lp.height = ((if (big) 160 else 72) * d).toInt(); brandImg.layoutParams = lp
+            lp.width = ((if (big) 230 else 110) * d).toInt(); lp.height = ((if (big) 110 else 56) * d).toInt(); brandImg.layoutParams = lp
         } else {
             brandImg.visibility = View.GONE
             brandTv.text = name; brandTv.textSize = if (big) 46f else 22f
@@ -440,16 +453,16 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val (name, color) = brand(aid)
         val visa = name == "VISA"
         val box = findViewById<View>(R.id.statusBox)
-        box.setBackgroundColor(Color.parseColor(if (visa) "#1434CB" else "#ffffff"))
-        status.visibility = View.INVISIBLE; detail.visibility = View.INVISIBLE; apdu.visibility = View.INVISIBLE; bigIcon.visibility = View.GONE
-        showBrand(aid, big = true, onDark = visa)
+        box.setBackgroundColor(Color.WHITE)   // v3.0: ambas marcas sobre blanco, logo original del cliente (Visa azul / símbolo MC)
+        status.visibility = View.INVISIBLE; detail.visibility = View.INVISIBLE; apdu.visibility = View.INVISIBLE; bigIcon.visibility = View.GONE; waveImg.visibility = View.GONE
+        showBrand(aid, big = true)
         val v: View = if (brandImg.visibility == View.VISIBLE) brandImg else brandTv
-        v.scaleX = 0.55f; v.scaleY = 0.55f; v.alpha = 0f
-        v.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(480).setInterpolator(android.view.animation.OvershootInterpolator(1.2f)).start()
+        v.scaleX = 0.8f; v.scaleY = 0.8f; v.alpha = 0f
+        v.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(520).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
         sound(if (visa) R.raw.snd_visa else R.raw.snd_mc)
         vibrate(120)
         lifecycleScope.launch {
-            kotlinx.coroutines.delay(2600)
+            kotlinx.coroutines.delay(3300)
             v.animate().alpha(0f).setDuration(220).start()
             kotlinx.coroutines.delay(230)
             box.setBackgroundColor(Color.TRANSPARENT)
@@ -466,12 +479,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         lifecycleScope.launch {
             setStatus(St.READING, "Leyendo tarjeta…", "SELECT PPSE → AID " + aid.take(10) + "… · " + name)
             showBrand(null)
-            kotlinx.coroutines.delay(700)
+            kotlinx.coroutines.delay(900)
             showBrand(aid)
             setStatus(St.AUTH, "Tarjeta $name", "GPO → criptograma ARQC " + arqc.take(8) + "… · ATC " + "%04d".format(atc))
-            kotlinx.coroutines.delay(750)
+            kotlinx.coroutines.delay(950)
             setStatus(St.AUTH, "Autorizando…", "0100 → red $name → emisor · esperando 0110")
-            kotlinx.coroutines.delay(1000)
+            kotlinx.coroutines.delay(1300)
             if (approved) brandMoment(aid) { onDone() }
             else { onDone(); sound(R.raw.snd_decline) }
         }
@@ -555,12 +568,14 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         amountTv.text = fmt(cents)
         amountTv.setTextColor(if (cents == 0L) Color.parseColor("#b5b8c4") else Color.parseColor("#111111"))
         keys.visibility = if (st == St.AMOUNT) View.VISIBLE else View.GONE
-        bigIcon.visibility = if (st == St.AMOUNT) View.GONE else View.VISIBLE
+        bigIcon.visibility = if (st == St.AMOUNT || st == St.WAITING || st == St.READING) View.GONE else View.VISIBLE
+        waveImg.visibility = if (st == St.WAITING || st == St.READING) View.VISIBLE else View.GONE
+        waveImg.alpha = if (st == St.READING) 0.55f else 1f
         label.text = when (st) { St.AMOUNT -> "IMPORTE"; St.WAITING, St.READING, St.SEE_PHONE -> "TOTAL A PAGAR"; else -> "TOTAL" }
         when (st) {
             St.AMOUNT -> { status.text = ""; detail.text = "Ingresá el importe y tocá COBRAR"; bigIcon.text = ""; brandTv.visibility = View.GONE; brandImg.visibility = View.GONE }
-            St.WAITING -> { status.text = "Acerque tarjeta o teléfono"; detail.text = (if (blePhone.isNotEmpty()) "Bluetooth · " + blePhone + " · " else nfcStatus() + " · ") + merchant.name; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0ea5e9")); brandTv.visibility = View.GONE; brandImg.visibility = View.GONE }
-            St.READING -> { status.text = "Leyendo… no retire"; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0369a1")) }
+            St.WAITING -> { status.text = "Acerque tarjeta o teléfono"; detail.text = (if (blePhone.isNotEmpty()) "Bluetooth · " + blePhone + " · " else nfcStatus() + " · ") + merchant.name; bigIcon.text = ""; brandTv.visibility = View.GONE; brandImg.visibility = View.GONE }
+            St.READING -> { status.text = "Leyendo… no retire"; bigIcon.text = "" }
             St.SEE_PHONE -> { bigIcon.text = "📱"; bigIcon.setTextColor(Color.parseColor("#f59e0b")) }
             St.AUTH -> { bigIcon.text = "⋯"; bigIcon.setTextColor(Color.parseColor("#0369a1")) }
             St.APPROVED -> { bigIcon.text = "✔"; bigIcon.setTextColor(Color.parseColor("#16a34a")); status.setTextColor(Color.parseColor("#15803d")) }

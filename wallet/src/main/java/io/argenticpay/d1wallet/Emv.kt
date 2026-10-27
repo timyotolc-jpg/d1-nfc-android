@@ -29,7 +29,8 @@ object Emv {
 
     fun ppseFci(scheme: String): ByteArray {
         val entry = Tlv.t("61", Tlv.cat(Tlv.t("4F", aidFor(scheme)), Tlv.t("50", label(scheme).toByteArray()), Tlv.t("87", "01")))
-        val fci = Tlv.t("6F", Tlv.cat(Tlv.t("84", PPSE), Tlv.t("A5", Tlv.t("BF0C", entry))))
+        // DF01 "D1NFC": marca propietaria para que D1 POS sepa que del otro lado está el motor D1 (EMV real) y no otra billetera
+        val fci = Tlv.t("6F", Tlv.cat(Tlv.t("84", PPSE), Tlv.t("A5", Tlv.t("BF0C", Tlv.cat(entry, Tlv.t("DF01", "D1NFC".toByteArray()))))))
         return fci + SW_OK
     }
 
