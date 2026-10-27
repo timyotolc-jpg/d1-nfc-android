@@ -6,7 +6,9 @@ plugins {
 // D1 Showcase — la demo web (sdk.argenticpay.io) empaquetada como app Android con el motor NFC adentro.
 // El motor es el mismo código del módulo :wallet (se compila dentro de esta app): HCE, LUK, biometría, billetera predeterminada.
 android {
-    namespace = "io.argenticpay.d1showcase"
+    // namespace = paquete de la clase R: el motor (fuentes de :wallet) referencia R.string.* sin calificar, así que la R
+    // tiene que ser io.argenticpay.d1wallet.R; el applicationId (lo que ve Play) sigue siendo io.argenticpay.d1showcase
+    namespace = "io.argenticpay.d1wallet"
     compileSdk = 36
 
     defaultConfig {

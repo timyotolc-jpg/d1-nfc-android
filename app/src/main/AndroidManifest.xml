@@ -23,7 +23,7 @@
 
         <!-- La demo web dentro de un WebView; window.D1Native la conecta con el motor NFC de esta misma app -->
         <activity
-            android:name=".MainActivity"
+            android:name="io.argenticpay.d1showcase.MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="portrait"

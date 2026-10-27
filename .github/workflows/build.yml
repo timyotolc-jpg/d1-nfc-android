@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   build:
@@ -30,7 +31,16 @@ jobs:
           gradle-version: "8.7"
 
       - name: Build debug APKs
-        run: gradle --no-daemon :wallet:assembleDebug :pos:assembleDebug :app:assembleDebug
+        run: gradle --no-daemon --console=plain :wallet:assembleDebug :pos:assembleDebug :app:assembleDebug 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
+
+      # si falla, el final del log queda en un issue (los logs de Actions no siempre son accesibles desde afuera)
+      - name: Report build failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          { echo '```'; grep -n "e: \|error:\|What went wrong\|FAILED\|Unresolved\|Execution failed" build.log | head -60; echo '...'; tail -60 build.log; echo '```'; } > body.md
+          gh issue create --title "Build failed: ${GITHUB_SHA::7}" --body-file body.md || true
 
       - name: Rename APKs
         run: |
