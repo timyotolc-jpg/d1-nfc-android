@@ -8,12 +8,15 @@ import android.nfc.NfcAdapter
 import android.nfc.cardemulation.CardEmulation
 import org.json.JSONObject
 
-/** Eventos del servicio HCE → demo web (vía Relay / sesión Live). */
+/** Eventos del servicio HCE → demo web: por la sesión Live (Relay) y, dentro de la app D1 Showcase, directo al WebView (sink). */
 object NfcEvents {
+    /** la app con WebView se engancha acá y manda cada evento a window.d1NativeEvent */
+    @Volatile var sink: ((JSONObject) -> Unit)? = null
+
     fun emit(type: String, build: JSONObject.() -> Unit = {}) {
         val j = JSONObject().put("type", type).put("ts", System.currentTimeMillis())
         j.build()
-        Relay.wallet(j)
+        Relay.wallet(j)   // Relay también se lo pasa al sink (app con WebView)
     }
 }
 

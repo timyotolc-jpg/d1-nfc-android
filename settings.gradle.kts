@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "d1-nfc-android"
-include(":wallet", ":pos")
+include(":wallet", ":pos", ":app")

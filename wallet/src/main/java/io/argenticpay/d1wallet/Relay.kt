@@ -33,7 +33,10 @@ object Relay {
     }
 
     /** Evento para el demo web (mismo JSON que antes recibía window.d1NativeEvent). */
-    fun wallet(ev: JSONObject) { queue.trySend("wallet" to ev) }
+    fun wallet(ev: JSONObject) {
+        queue.trySend("wallet" to ev)
+        NfcEvents.sink?.invoke(ev)   // dentro de la app D1 Showcase: directo a window.d1NativeEvent
+    }
 
     /** Evento "crudo" de la sesión Live (por ejemplo "tap", que el POS de pantalla espeja). */
     fun post(type: String, data: JSONObject) { queue.trySend(type to data) }

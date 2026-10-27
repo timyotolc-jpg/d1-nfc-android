@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">D1 Showcase</string>
+    <string name="hce_label">D1 Showcase · pago sin contacto</string>
+    <string name="hce_desc">Banco D1 — pago sin contacto (NFC Wallet demo)</string>
+    <string name="hce_aid_group">Tarjetas Banco D1</string>
+    <string name="notif_channel">Pagos sin contacto</string>
+    <string name="notif_auth_title">Verificá para pagar</string>
+    <string name="notif_auth_body">El POS espera tu verificación. Tocá para confirmar con tu huella.</string>
+</resources>

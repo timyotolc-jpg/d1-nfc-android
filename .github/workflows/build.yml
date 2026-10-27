@@ -30,13 +30,14 @@ jobs:
           gradle-version: "8.7"
 
       - name: Build debug APKs
-        run: gradle --no-daemon :wallet:assembleDebug :pos:assembleDebug
+        run: gradle --no-daemon :wallet:assembleDebug :pos:assembleDebug :app:assembleDebug
 
       - name: Rename APKs
         run: |
           mkdir -p out
           cp wallet/build/outputs/apk/debug/wallet-debug.apk out/d1-wallet.apk
           cp pos/build/outputs/apk/debug/pos-debug.apk out/d1-pos.apk
+          cp app/build/outputs/apk/debug/app-debug.apk out/d1-showcase.apk
           ls -la out
 
       # Google Play (prueba interna): bundle .aab firmado con la upload key. Secreto UPLOAD_KEY = "password:base64(release.jks)".
@@ -45,12 +46,14 @@ jobs:
         run: |
           echo "${UPLOAD_KEY#*:}" | base64 -d > wallet/release.jks
           echo "KEYSTORE_PASSWORD=${UPLOAD_KEY%%:*}" >> "$GITHUB_ENV"
-      - name: Build signed bundle + release APK (wallet)
+      - name: Build signed bundles + release APKs (wallet + app)
         if: env.UPLOAD_KEY != ''
         run: |
-          gradle --no-daemon :wallet:bundleRelease :wallet:assembleRelease
+          gradle --no-daemon :wallet:bundleRelease :wallet:assembleRelease :app:bundleRelease :app:assembleRelease
           cp wallet/build/outputs/bundle/release/wallet-release.aab out/d1-wallet.aab
           cp wallet/build/outputs/apk/release/wallet-release.apk out/d1-wallet-release.apk
+          cp app/build/outputs/bundle/release/app-release.aab out/d1-showcase.aab
+          cp app/build/outputs/apk/release/app-release.apk out/d1-showcase-release.apk
           rm -f wallet/release.jks
           ls -la out
 
@@ -66,7 +69,7 @@ jobs:
         with:
           tag_name: latest
           name: D1 NFC demo — latest build
-          body: "Última compilación: d1-wallet.apk (motor NFC, debug), d1-wallet.aab + d1-wallet-release.apk (firmados, para Google Play) y d1-pos.apk (lector/POS)."
+          body: "Última compilación: d1-showcase.apk / d1-showcase.aab (la demo como app, con el motor NFC adentro), d1-wallet.apk / d1-wallet.aab (motor NFC invisible) y d1-pos.apk (lector/POS)."
           files: |
             out/*.apk
             out/*.aab

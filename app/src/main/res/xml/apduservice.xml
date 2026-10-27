@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mismos AIDs que el sample oficial dp-hce-sample-android (Thales NFC Wallet SDK) -->
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/hce_desc"
+    android:apduServiceBanner="@drawable/hce_banner"
+    android:requireDeviceUnlock="false">
+    <aid-group android:category="payment" android:description="@string/hce_aid_group">
+        <!-- Proximity Payment System Environment (2PAY.SYS.DDF01) -->
+        <aid-filter android:name="325041592E5359532E4444463031" />
+        <!-- Visa credit/debit -->
+        <aid-filter android:name="A0000000031010" />
+        <!-- Visa Electron -->
+        <aid-filter android:name="A0000000032010" />
+        <!-- Mastercard -->
+        <aid-filter android:name="A0000000041010" />
+        <!-- Maestro -->
+        <aid-filter android:name="A0000000043060" />
+    </aid-group>
+</host-apdu-service>

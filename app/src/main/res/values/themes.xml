@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.D1Showcase" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">#0b1030</item>
+        <item name="android:statusBarColor">#0b1030</item>
+        <item name="android:navigationBarColor">#0b1030</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="colorPrimary">#1a5fa0</item>
+        <item name="colorAccent">#00b7e1</item>
+    </style>
+    <!-- El servicio HCE y AuthActivity vienen del módulo wallet y referencian estos nombres -->
+    <style name="Theme.D1Wallet" parent="Theme.D1Showcase" />
+    <style name="Theme.D1Wallet.Invisible" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="colorPrimary">#1a5fa0</item>
+        <item name="colorAccent">#00b7e1</item>
+    </style>
+</resources>
