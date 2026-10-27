@@ -5,14 +5,14 @@ plugins {
 
 android {
     namespace = "io.argenticpay.d1wallet"
-    compileSdk = 35   // Google Play exige target 35 para apps nuevas (prueba interna incluida)
+    compileSdk = 36   // Google Play exige target 36 (Android 16) para apps nuevas, prueba interna incluida
 
     defaultConfig {
         applicationId = "io.argenticpay.d1wallet"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 4
-        versionName = "2.2"
+        targetSdk = 36
+        versionCode = 5
+        versionName = "2.3"
     }
     // Firma de release: el workflow deja la upload key en wallet/release.jks (secreto UPLOAD_KEY = "password:base64(jks)")
     val ksFile = file("release.jks")
