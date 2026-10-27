@@ -11,11 +11,29 @@ android {
         applicationId = "io.argenticpay.d1pos"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "2.8"
+        versionCode = 11
+        versionName = "2.9"
+    }
+    // Firma estable (misma upload key que el motor): así cada versión se instala ENCIMA de la anterior y la configuración
+    // (sesión, impresora, moneda) no se pierde. Antes el APK iba firmado con una debug key nueva en cada build de CI y
+    // Android obligaba a desinstalar.
+    val ksFile = file("../wallet/release.jks")
+    val ksPass = System.getenv("KEYSTORE_PASSWORD") ?: ""
+    signingConfigs {
+        create("release") {
+            if (ksFile.exists() && ksPass.isNotEmpty()) {
+                storeFile = ksFile
+                storePassword = ksPass
+                keyAlias = "d1wallet"
+                keyPassword = ksPass
+            }
+        }
     }
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            if (ksFile.exists() && ksPass.isNotEmpty()) signingConfig = signingConfigs.getByName("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -56,14 +56,19 @@ jobs:
         run: |
           echo "${UPLOAD_KEY#*:}" | base64 -d > wallet/release.jks
           echo "KEYSTORE_PASSWORD=${UPLOAD_KEY%%:*}" >> "$GITHUB_ENV"
-      - name: Build signed bundles + release APKs (wallet + app)
+      # Los APKs publicados con el nombre principal (d1-pos.apk, d1-wallet.apk, d1-showcase.apk) van firmados con la upload key:
+      # firma estable → cada versión se instala encima de la anterior sin desinstalar y sin perder la configuración.
+      - name: Build signed bundles + release APKs (wallet + app + pos)
         if: env.UPLOAD_KEY != ''
         run: |
-          gradle --no-daemon :wallet:bundleRelease :wallet:assembleRelease :app:bundleRelease :app:assembleRelease
+          gradle --no-daemon :wallet:bundleRelease :wallet:assembleRelease :app:bundleRelease :app:assembleRelease :pos:assembleRelease
           cp wallet/build/outputs/bundle/release/wallet-release.aab out/d1-wallet.aab
+          cp wallet/build/outputs/apk/release/wallet-release.apk out/d1-wallet.apk
           cp wallet/build/outputs/apk/release/wallet-release.apk out/d1-wallet-release.apk
           cp app/build/outputs/bundle/release/app-release.aab out/d1-showcase.aab
+          cp app/build/outputs/apk/release/app-release.apk out/d1-showcase.apk
           cp app/build/outputs/apk/release/app-release.apk out/d1-showcase-release.apk
+          cp pos/build/outputs/apk/release/pos-release.apk out/d1-pos.apk
           rm -f wallet/release.jks
           ls -la out
 

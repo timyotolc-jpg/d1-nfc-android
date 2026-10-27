@@ -593,17 +593,24 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val pad = (16 * resources.displayMetrics.density).toInt()
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, 0) }
         val eApi = EditText(this).apply { hint = "API base (…/prod)"; setText(api) }
-        val eSes = EditText(this).apply { hint = "Sesión Live (4 dígitos, opcional)"; setText(session) }
+        val eSes = EditText(this).apply { hint = "Sesión (4 dígitos de Demo ⚙ del teléfono) — obligatoria para tap simple"; setText(session) }
         val eTerm = EditText(this).apply { hint = "Terminal ID"; setText(terminalId) }
         val curList = listOf("USD", "CLP", "ARS", "MXN", "BRL", "UYU", "PYG", "PEN", "COP")
-        val spCur = Spinner(this).apply { adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, curList); setSelection(curList.indexOf(currency).coerceAtLeast(0)) }
+        val spCur = Spinner(this).apply { adapter = object : ArrayAdapter<String>(context, android.R.layout.simple_spinner_dropdown_item, curList) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View = super.getView(position, convertView, parent).also { (it as? TextView)?.setTextColor(Color.BLACK) }
+        }; setSelection(curList.indexOf(currency).coerceAtLeast(0)) }
         val printers = EscPos.bonded()
         val names = listOf("Sin impresora") + printers.map { (it.name ?: "?") + " · " + it.address }
-        val spPr = Spinner(this).apply { adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, names); setSelection((printers.indexOfFirst { it.address == printerMac } + 1).coerceAtLeast(0)) }
+        val dark = { ctx: android.content.Context, items: List<String> -> object : ArrayAdapter<String>(ctx, android.R.layout.simple_spinner_dropdown_item, items) {
+            override fun getView(position: Int, convertView: View?, parent: android.view.ViewGroup): View = super.getView(position, convertView, parent).also { (it as? TextView)?.setTextColor(Color.BLACK) }
+        } }
+        val spPr = Spinner(this).apply { adapter = dark(context, names); setSelection((printers.indexOfFirst { it.address == printerMac } + 1).coerceAtLeast(0)) }
         val lbl = { t: String -> TextView(this).apply { text = t; setTextColor(Color.GRAY); textSize = 12f; setPadding(0, pad / 2, 0, 0) } }
         val swSimple = android.widget.Switch(this).apply { text = "Tap simple (sin app en el teléfono): cualquier teléfono en el campo NFC cobra el token de la sesión Live"; isChecked = tapSimple; textSize = 13f; setPadding(0, pad / 2, 0, 0) }
         val swCompat = android.widget.Switch(this).apply { text = "Lector NFC en modo compatibilidad (si con la venta esperando no detecta el teléfono: equipos MediaTek / Android 8)"; isChecked = nfcCompat; textSize = 13f; setPadding(0, pad / 2, 0, 0) }
-        box.addView(eApi); box.addView(eSes); box.addView(eTerm); box.addView(swSimple); box.addView(swCompat); box.addView(lbl("NFC: " + (if (nfc == null) "no disponible" else if (nfc?.isEnabled == true) "encendido" else "APAGADO (Ajustes → NFC)"))); box.addView(lbl("Moneda")); box.addView(spCur); box.addView(lbl("Impresora Bluetooth (emparejada)")); box.addView(spPr)
+        box.addView(eApi); box.addView(eSes); box.addView(eTerm); box.addView(swSimple); box.addView(swCompat); box.addView(lbl("NFC: " + (if (nfc == null) "no disponible" else if (nfc?.isEnabled == true) "encendido" else "APAGADO (Ajustes → NFC)"))); box.addView(lbl("Moneda")); box.addView(spCur)
+        box.addView(lbl("Impresora Bluetooth (emparejada) · " + (if (printers.isEmpty()) "ninguna emparejada: Ajustes → Bluetooth → emparejar la impresora" else printers.size.toString() + " emparejada(s)") + (if (printerMac.isNotEmpty()) " · usando " + (printers.firstOrNull { it.address == printerMac }?.name ?: printerMac) else " · elegí una y tocá «Imprimir ticket de prueba»")))
+        box.addView(spPr)
         box.addView(lbl("Tap Bluetooth (SDK2): " + when { ble == null -> if (bleStatus.isNotEmpty()) bleStatus else "sin permisos / no soportado"; blePhone.isNotEmpty() -> "teléfono conectado · $blePhone"; ble?.advertising == true -> "anunciando, esperando teléfono"; else -> bleStatus }))
         // ---- actualización / descargas (sin tipear URLs en el POS) ----
         val ver = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
