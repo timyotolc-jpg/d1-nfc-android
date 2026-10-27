@@ -318,13 +318,47 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         }
     }
 
+    /** v2.4: «compatibilidad» = foreground dispatch (el polling normal del sistema) en vez de reader mode; para ROMs
+     *  (MediaTek/Android 8) donde enableReaderMode no detecta teléfonos. En ⚙. */
+    private val nfcCompat get() = prefs.getBoolean("nfcCompat", false)
+    private var readerOn = false
+
     private fun enableReader() {
         val a = nfc ?: return
+        readerOn = true
+        if (nfcCompat) {
+            runCatching {
+                val pi = android.app.PendingIntent.getActivity(this, 0, android.content.Intent(this, javaClass).addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    if (Build.VERSION.SDK_INT >= 31) android.app.PendingIntent.FLAG_MUTABLE else 0)
+                val tech = arrayOf(arrayOf(IsoDep::class.java.name), arrayOf(android.nfc.tech.NfcA::class.java.name), arrayOf(android.nfc.tech.NfcB::class.java.name))
+                a.enableForegroundDispatch(this, pi, null, tech)
+            }.onFailure { readerOn = false; Log.w("D1POS", "foreground dispatch: $it") }
+            return
+        }
         val flags = NfcAdapter.FLAG_READER_NFC_A or NfcAdapter.FLAG_READER_NFC_B or NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK or NfcAdapter.FLAG_READER_NO_PLATFORM_SOUNDS
-        a.enableReaderMode(this, this, flags, Bundle().apply { putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250) })
+        runCatching { a.enableReaderMode(this, this, flags, Bundle().apply { putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 250) }) }
+            .onFailure { readerOn = false; Log.w("D1POS", "reader mode: $it") }
     }
 
-    private fun disableReader() { runCatching { nfc?.disableReaderMode(this) } }
+    private fun disableReader() {
+        readerOn = false
+        runCatching { nfc?.disableReaderMode(this) }
+        runCatching { nfc?.disableForegroundDispatch(this) }
+    }
+
+    /** modo compatibilidad: el sistema entrega el tag por intent */
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        val tag: Tag? = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(NfcAdapter.EXTRA_TAG, Tag::class.java) else @Suppress("DEPRECATION") intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
+        if (tag != null) onTagDiscovered(tag)
+    }
+
+    /** estado del NFC para mostrarlo mientras se espera el toque */
+    private fun nfcStatus(): String {
+        val a = nfc ?: return "⚠ este equipo no tiene NFC"
+        if (!a.isEnabled) return "⚠ NFC apagado: activalo en Ajustes"
+        return if (nfcCompat) "NFC lector (compatibilidad)" else "NFC lector activo"
+    }
 
     override fun onResume() { super.onResume(); if (st == St.WAITING || st == St.SEE_PHONE) enableReader() }
     override fun onPause() { disableReader(); super.onPause() }
@@ -434,7 +468,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         label.text = when (st) { St.AMOUNT -> "IMPORTE"; St.WAITING, St.READING, St.SEE_PHONE -> "TOTAL A PAGAR"; else -> "TOTAL" }
         when (st) {
             St.AMOUNT -> { status.text = ""; detail.text = "Ingresá el importe y tocá COBRAR"; bigIcon.text = "" }
-            St.WAITING -> { status.text = "Acerque tarjeta o teléfono"; detail.text = (if (blePhone.isNotEmpty()) "Bluetooth · " + blePhone + " · " else "NFC activo · ") + merchant.name; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0ea5e9")) }
+            St.WAITING -> { status.text = "Acerque tarjeta o teléfono"; detail.text = (if (blePhone.isNotEmpty()) "Bluetooth · " + blePhone + " · " else nfcStatus() + " · ") + merchant.name; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0ea5e9")) }
             St.READING -> { status.text = "Leyendo… no retire"; bigIcon.text = "))))"; bigIcon.setTextColor(Color.parseColor("#0369a1")) }
             St.SEE_PHONE -> { bigIcon.text = "📱"; bigIcon.setTextColor(Color.parseColor("#f59e0b")) }
             St.AUTH -> { bigIcon.text = "⋯"; bigIcon.setTextColor(Color.parseColor("#0369a1")) }
@@ -477,7 +511,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val spPr = Spinner(this).apply { adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, names); setSelection((printers.indexOfFirst { it.address == printerMac } + 1).coerceAtLeast(0)) }
         val lbl = { t: String -> TextView(this).apply { text = t; setTextColor(Color.GRAY); textSize = 12f; setPadding(0, pad / 2, 0, 0) } }
         val swSimple = android.widget.Switch(this).apply { text = "Tap simple (sin app en el teléfono): cualquier teléfono en el campo NFC cobra el token de la sesión Live"; isChecked = tapSimple; textSize = 13f; setPadding(0, pad / 2, 0, 0) }
-        box.addView(eApi); box.addView(eSes); box.addView(eTerm); box.addView(swSimple); box.addView(lbl("Moneda")); box.addView(spCur); box.addView(lbl("Impresora Bluetooth (emparejada)")); box.addView(spPr)
+        val swCompat = android.widget.Switch(this).apply { text = "Lector NFC en modo compatibilidad (si con la venta esperando no detecta el teléfono: equipos MediaTek / Android 8)"; isChecked = nfcCompat; textSize = 13f; setPadding(0, pad / 2, 0, 0) }
+        box.addView(eApi); box.addView(eSes); box.addView(eTerm); box.addView(swSimple); box.addView(swCompat); box.addView(lbl("NFC: " + (if (nfc == null) "no disponible" else if (nfc?.isEnabled == true) "encendido" else "APAGADO (Ajustes → NFC)"))); box.addView(lbl("Moneda")); box.addView(spCur); box.addView(lbl("Impresora Bluetooth (emparejada)")); box.addView(spPr)
         box.addView(lbl("Tap Bluetooth (SDK2): " + when { ble == null -> if (bleStatus.isNotEmpty()) bleStatus else "sin permisos / no soportado"; blePhone.isNotEmpty() -> "teléfono conectado · $blePhone"; ble?.advertising == true -> "anunciando, esperando teléfono"; else -> bleStatus }))
         val btnTest = Button(this).apply { text = "Imprimir ticket de prueba"; gravity = Gravity.CENTER }
         box.addView(btnTest)
@@ -485,7 +520,8 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             .setPositiveButton("Guardar") { _, _ ->
                 prefs.edit().putString("api", eApi.text.toString().trim()).putString("session", eSes.text.toString().trim()).putString("terminal", eTerm.text.toString().trim())
                     .putString("currency", curList[spCur.selectedItemPosition]).putString("printer", if (spPr.selectedItemPosition == 0) "" else printers[spPr.selectedItemPosition - 1].address)
-                    .putBoolean("tapSimple", swSimple.isChecked).apply()
+                    .putBoolean("tapSimple", swSimple.isChecked).putBoolean("nfcCompat", swCompat.isChecked).apply()
+                if (st == St.WAITING) { disableReader(); enableReader() }
                 findViewById<TextView>(R.id.terminal).text = terminalId
                 render()
             }.setNegativeButton("Cerrar", null).create()
