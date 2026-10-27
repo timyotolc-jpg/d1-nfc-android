@@ -605,6 +605,20 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         val swCompat = android.widget.Switch(this).apply { text = "Lector NFC en modo compatibilidad (si con la venta esperando no detecta el teléfono: equipos MediaTek / Android 8)"; isChecked = nfcCompat; textSize = 13f; setPadding(0, pad / 2, 0, 0) }
         box.addView(eApi); box.addView(eSes); box.addView(eTerm); box.addView(swSimple); box.addView(swCompat); box.addView(lbl("NFC: " + (if (nfc == null) "no disponible" else if (nfc?.isEnabled == true) "encendido" else "APAGADO (Ajustes → NFC)"))); box.addView(lbl("Moneda")); box.addView(spCur); box.addView(lbl("Impresora Bluetooth (emparejada)")); box.addView(spPr)
         box.addView(lbl("Tap Bluetooth (SDK2): " + when { ble == null -> if (bleStatus.isNotEmpty()) bleStatus else "sin permisos / no soportado"; blePhone.isNotEmpty() -> "teléfono conectado · $blePhone"; ble?.advertising == true -> "anunciando, esperando teléfono"; else -> bleStatus }))
+        // ---- actualización / descargas (sin tipear URLs en el POS) ----
+        val ver = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
+        box.addView(lbl("D1 POS $ver · actualizar desde acá (baja d1-pos.apk de GitHub y abre el instalador)"))
+        val btnUpd = Button(this).apply { text = "Actualizar D1 POS (última versión)"; gravity = Gravity.CENTER }
+        box.addView(btnUpd)
+        btnUpd.setOnClickListener {
+            if (!Updater.canInstall(this)) { Toast.makeText(this, "Permití «instalar apps desconocidas» para D1 POS y volvé a tocar", Toast.LENGTH_LONG).show(); Updater.askInstallPermission(this); return@setOnClickListener }
+            Updater.download(this, Updater.POS_APK, "d1-pos.apk")
+        }
+        val tvLinks = TextView(this).apply {
+            text = "Para el teléfono: app D1 Showcase → " + Updater.SHOWCASE_APK + "\nMotor NFC (invisible) → " + Updater.WALLET_APK
+            textSize = 10f; setTextColor(Color.GRAY); setPadding(0, pad / 2, 0, 0); setTextIsSelectable(true)
+        }
+        box.addView(tvLinks)
         val btnTest = Button(this).apply { text = "Imprimir ticket de prueba"; gravity = Gravity.CENTER }
         box.addView(btnTest)
         val avail = InternalPrinter.available()
@@ -623,7 +637,7 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
                 render()
             }
         }
-        val dlg = AlertDialog.Builder(this).setTitle("D1 POS · configuración").setView(box)
+        val dlg = AlertDialog.Builder(this).setTitle("D1 POS · configuración").setView(android.widget.ScrollView(this).apply { addView(box) })
             .setPositiveButton("Guardar") { _, _ ->
                 prefs.edit().putString("api", eApi.text.toString().trim()).putString("session", eSes.text.toString().trim()).putString("terminal", eTerm.text.toString().trim())
                     .putString("currency", curList[spCur.selectedItemPosition]).putString("printer", if (spPr.selectedItemPosition == 0) "" else printers[spPr.selectedItemPosition - 1].address)
