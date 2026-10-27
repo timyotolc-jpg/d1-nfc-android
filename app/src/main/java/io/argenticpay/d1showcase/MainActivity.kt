@@ -154,14 +154,18 @@ class MainActivity : AppCompatActivity() {
         val open = Intent(this, MainActivity::class.java).apply { action = ACTION_PUSH + id; putExtra(EXTRA_PUSH, id); addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP) }
         val pi = PendingIntent.getActivity(this, id.hashCode(), open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val large = runCatching { BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher) }.getOrNull()
+        // v1.3: en el pop-up «breve» de Samsung solo se ve una línea → el título lleva también el texto (comercio · importe);
+        // expandida (o con el estilo «detallado») se ve todo con BigTextStyle
+        val t = (title ?: app ?: "Banco D1").trim()
+        val b = (body ?: "").trim()
         val n = NotificationCompat.Builder(this, CH_PUSH)
             .setSmallIcon(R.drawable.ic_notif)
             .setLargeIcon(large)
-            .setContentTitle(title ?: (app ?: "Banco D1"))
-            .setContentText(body ?: "")
+            .setContentTitle(if (b.isNotEmpty()) "$t — $b" else t)
+            .setContentText(b)
             .setSubText(app)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body ?: ""))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(b).setBigContentTitle(t).setSummaryText(app))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setAutoCancel(true)
@@ -350,7 +354,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val HOST = "sdk.argenticpay.io"
         const val BASE = "https://sdk.argenticpay.io"
-        const val BuildConfig_VERSION = "1.2"
+        const val BuildConfig_VERSION = "1.3"
         const val CH_PUSH = "d1_push"
         const val EXTRA_PUSH = "d1.push"
         const val ACTION_PUSH = "io.argenticpay.d1showcase.PUSH."
