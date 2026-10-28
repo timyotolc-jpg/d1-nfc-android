@@ -59,6 +59,9 @@ class MainActivity : AppCompatActivity() {
     // v1.2: inicio = marca blanca (index1.html: elegís el banco); Demo ⚙ → «Cambiar inicio» pasa a DigiBank (index.html)
     private val home get() = prefs.getString("home", "index1.html") ?: "index1.html"
     private val base get() = prefs.getString("base", BASE) ?: BASE
+    // v1.4: el push se muestra como el banner de la web (grande, legible, arriba de todo); la notificación de Android queda
+    // como opción apagada (el pop-up «breve» de Samsung lo achicaba a una línea)
+    private val nativePush get() = prefs.getBoolean("nativePush", false)
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,7 +99,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String) {
                 // la web ya está: le avisamos el estado del motor (window.d1NativeEvent lo espera al montar)
                 emit(JSONObject().put("type", "nativeReady").put("state", state()))
-                injectPushBridge()
+                if (nativePush) injectPushBridge()
             }
         }
         web.webChromeClient = object : WebChromeClient() {
@@ -348,13 +351,14 @@ class MainActivity : AppCompatActivity() {
 
         /** v1.2: push real (lo usa el puente DOM inyectado; también puede llamarlo la web directamente) */
         @JavascriptInterface fun notify(id: String?, app: String?, title: String?, body: String?): Boolean = notifyPush(id ?: ("p" + System.currentTimeMillis()), app, title, body)
+        @JavascriptInterface fun setNativePush(on: Boolean) { prefs.edit().putBoolean("nativePush", on).apply(); runOnUiThread { if (on) injectPushBridge() } }
         @JavascriptInterface fun cancelNotify(id: String?) { id?.let { runCatching { NotificationManagerCompat.from(this@MainActivity).cancel(it.hashCode()) } } }
     }
 
     companion object {
         const val HOST = "sdk.argenticpay.io"
         const val BASE = "https://sdk.argenticpay.io"
-        const val BuildConfig_VERSION = "1.3"
+        const val BuildConfig_VERSION = "1.4"
         const val CH_PUSH = "d1_push"
         const val EXTRA_PUSH = "d1.push"
         const val ACTION_PUSH = "io.argenticpay.d1showcase.PUSH."
