@@ -105,6 +105,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         ticketNo = prefs.getInt("ticket", 317)
         amountTv = findViewById(R.id.amount); label = findViewById(R.id.label); status = findViewById(R.id.status)
         detail = findViewById(R.id.detail); apdu = findViewById(R.id.apdu); bigIcon = findViewById(R.id.bigIcon); brandTv = findViewById(R.id.brand); brandImg = findViewById(R.id.brandImg); waveImg = findViewById(R.id.waveImg)
+        // v3.2: foto de regalo para la demo — se imprime con 📷 (raster ESC/POS, 384 puntos)
+        runCatching {
+            val bmp = android.graphics.BitmapFactory.decodeResource(resources, R.drawable.demo_foto, android.graphics.BitmapFactory.Options().apply { inScaled = false })
+            if (bmp != null) EscPos.images["foto"] = EscPos.raster(bmp)
+        }
+        findViewById<Button>(R.id.btnPhoto).setOnClickListener { printPhoto() }
         keys = findViewById(R.id.keys); btnMain = findViewById(R.id.btnMain); merchantSp = findViewById(R.id.merchant)
         merchantName = findViewById(R.id.merchantName); foot = findViewById(R.id.foot)
         findViewById<TextView>(R.id.terminal).text = terminalId
@@ -488,6 +494,27 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
             if (approved) brandMoment(aid) { onDone() }
             else { onDone(); sound(R.raw.snd_decline) }
         }
+    }
+
+    /** ticket de regalo: la foto del equipo + fecha; va a la impresora configurada en ⚙ */
+    private fun printPhoto() {
+        if (printerDev.isEmpty() && printerMac.isEmpty()) { foot.text = "Configurá la impresora en ⚙ para imprimir la foto"; vibrate(60); return }
+        if (!EscPos.images.containsKey("foto")) { foot.text = "No encuentro la foto en la app"; return }
+        val now = Date()
+        val lines = listOf(
+            "#D1 SHOWCASE",
+            "=Thales - Digital Payments",
+            "-",
+            "@foto",
+            "=Demo D1 - pago sin contacto",
+            "=" + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(now),
+            "=Gracias por acompanarnos!",
+            "-",
+            "=sdk.argenticpay.io",
+        )
+        foot.text = "Imprimiendo foto…"
+        vibrate(40)
+        printIfConfigured(lines)
     }
 
     private fun printIfConfigured(lines: List<String>) {

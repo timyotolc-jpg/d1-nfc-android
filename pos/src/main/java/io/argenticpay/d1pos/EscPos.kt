@@ -10,6 +10,40 @@ import java.util.UUID
 object EscPos {
     private val SPP: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
 
+    /** v3.2: imágenes por nombre (línea "@nombre" en el ticket) ya convertidas a raster ESC/POS (GS v 0), 384 puntos de ancho */
+    val images = HashMap<String, ByteArray>()
+
+    /** bitmap (blanco y negro o gris) → comandos GS v 0 en bloques de 96 filas; negro = bit 1; ancho fijo 384 (58 mm) */
+    fun raster(bmp: android.graphics.Bitmap, width: Int = 384): ByteArray {
+        val scaled = if (bmp.width == width) bmp else android.graphics.Bitmap.createScaledBitmap(bmp, width, bmp.height * width / bmp.width, true)
+        val w = scaled.width; val h = scaled.height; val bpr = (w + 7) / 8
+        val px = IntArray(w * h); scaled.getPixels(px, 0, w, 0, 0, w, h)
+        val out = java.io.ByteArrayOutputStream()
+        var y0 = 0
+        while (y0 < h) {
+            val rows = minOf(96, h - y0)
+            out.write(byteArrayOf(0x1D, 0x76, 0x30, 0x00, (bpr and 0xFF).toByte(), (bpr shr 8).toByte(), (rows and 0xFF).toByte(), (rows shr 8).toByte()))
+            for (y in y0 until y0 + rows) {
+                var x = 0
+                while (x < w) {
+                    var b = 0
+                    for (bit in 0 until 8) {
+                        val xx = x + bit
+                        if (xx < w) {
+                            val c = px[y * w + xx]
+                            val lum = (((c shr 16) and 0xFF) * 299 + ((c shr 8) and 0xFF) * 587 + (c and 0xFF) * 114) / 1000
+                            val alpha = (c ushr 24) and 0xFF
+                            if (alpha > 127 && lum < 128) b = b or (0x80 shr bit)
+                        }
+                    }
+                    out.write(b); x += 8
+                }
+            }
+            y0 += rows
+        }
+        return out.toByteArray()
+    }
+
     @SuppressLint("MissingPermission")
     fun bonded(): List<BluetoothDevice> = runCatching { BluetoothAdapter.getDefaultAdapter()?.bondedDevices?.toList() ?: emptyList() }.getOrDefault(emptyList())
 
@@ -26,7 +60,7 @@ object EscPos {
         val sock = dev.createRfcommSocketToServiceRecord(SPP)
         runCatching { ad.cancelDiscovery() }
         sock.connect()
-        sock.outputStream.use { o -> write(o, lines) }
+        sock.outputStream.use { o -> write(o, lines); Thread.sleep(if (lines.any { it.startsWith("@") }) 1500 else 400) }   // que el buffer BT llegue entero antes de cerrar
         sock.close()
     }
 
@@ -37,6 +71,7 @@ object EscPos {
         o.write(byteArrayOf(0x1B, 0x40))                  // init
         for (raw in lines) {
             when {
+                raw.startsWith("@") -> { val img = images[raw.drop(1)]; if (img != null) { o.write(byteArrayOf(0x1B, 0x61, 1)); o.write(img); o.write(byteArrayOf(0x0A, 0x1B, 0x61, 0)) } }
                 raw.startsWith("#") -> { o.write(byteArrayOf(0x1B, 0x61, 1, 0x1B, 0x45, 1, 0x1D, 0x21, 0x11)); o.write(ascii(raw.drop(1))); o.write(byteArrayOf(0x0A, 0x1D, 0x21, 0x00, 0x1B, 0x45, 0, 0x1B, 0x61, 0)) }
                 raw.startsWith("!") -> { o.write(byteArrayOf(0x1B, 0x61, 1, 0x1B, 0x45, 1, 0x1D, 0x21, 0x01)); o.write(ascii(raw.drop(1))); o.write(byteArrayOf(0x0A, 0x1D, 0x21, 0x00, 0x1B, 0x45, 0, 0x1B, 0x61, 0)) }
                 raw.startsWith("=") -> { o.write(byteArrayOf(0x1B, 0x61, 1)); o.write(ascii(raw.drop(1))); o.write(byteArrayOf(0x0A, 0x1B, 0x61, 0)) }

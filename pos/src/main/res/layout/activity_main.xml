@@ -28,6 +28,16 @@
             android:textSize="12sp"
             android:paddingHorizontal="8dp" />
         <Button
+            android:id="@+id/btnPhoto"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:paddingHorizontal="10dp"
+            android:text="📷"
+            android:textSize="16sp"
+            android:backgroundTint="#1f2a44"
+            android:textColor="#ffffff" />
+        <Button
             android:id="@+id/btnConfig"
             style="?attr/borderlessButtonStyle"
             android:layout_width="wrap_content"
