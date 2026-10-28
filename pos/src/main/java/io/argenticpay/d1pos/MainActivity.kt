@@ -502,15 +502,12 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         if (!EscPos.images.containsKey("foto")) { foot.text = "No encuentro la foto en la app"; return }
         val now = Date()
         val lines = listOf(
-            "#D1 SHOWCASE",
-            "=Thales - Digital Payments",
+            "#Diego's Staff 2026",
             "-",
             "@foto",
-            "=Demo D1 - pago sin contacto",
-            "=" + SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.US).format(now),
-            "=Gracias por acompanarnos!",
             "-",
-            "=sdk.argenticpay.io",
+            "!Diego's Staff 2026",
+            "=Santiago, " + SimpleDateFormat("dd/MM/yyyy", Locale.US).format(now),
         )
         foot.text = "Imprimiendo foto…"
         vibrate(40)
