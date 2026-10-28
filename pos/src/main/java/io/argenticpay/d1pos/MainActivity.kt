@@ -502,8 +502,6 @@ class MainActivity : AppCompatActivity(), NfcAdapter.ReaderCallback {
         if (!EscPos.images.containsKey("foto")) { foot.text = "No encuentro la foto en la app"; return }
         val now = Date()
         val lines = listOf(
-            "#Diego's Staff 2026",
-            "-",
             "@foto",
             "-",
             "!Diego's Staff 2026",
