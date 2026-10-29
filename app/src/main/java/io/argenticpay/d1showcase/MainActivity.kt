@@ -358,7 +358,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val HOST = "sdk.argenticpay.io"
         const val BASE = "https://sdk.argenticpay.io"
-        const val BuildConfig_VERSION = "1.4"
+        const val BuildConfig_VERSION = "1.5"
         const val CH_PUSH = "d1_push"
         const val EXTRA_PUSH = "d1.push"
         const val ACTION_PUSH = "io.argenticpay.d1showcase.PUSH."
